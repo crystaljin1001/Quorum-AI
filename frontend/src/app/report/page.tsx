@@ -27,7 +27,13 @@ import {
   Bot,
   Eye,
   Scale,
+  Sparkles,
+  Copy,
+  Check,
+  FileText,
+  File,
 } from "lucide-react";
+import { exportAsPDF, exportAsWord } from "@/lib/exportReport";
 
 // The poison pill contract text (fallback for demo)
 const DEMO_CONTRACT_TEXT = `# SHAREHOLDER RIGHTS AGREEMENT
@@ -329,6 +335,12 @@ interface OptimizerOutput {
   };
 }
 
+interface RemediationResult {
+  original: string;
+  rewritten: string;
+  rationale: string;
+}
+
 export default function ReportPage() {
   const [contractText, setContractText] = useState(DEMO_CONTRACT_TEXT);
   const [isLoading, setIsLoading] = useState(false);
@@ -339,6 +351,12 @@ export default function ReportPage() {
   const [highlightedLines, setHighlightedLines] = useState<{ start: number; end: number } | null>(null);
   const [activeCardIdx, setActiveCardIdx] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [remediationLoading, setRemediationLoading] = useState<string | null>(null);
+  const [remediationResults, setRemediationResults] = useState<Map<string, RemediationResult>>(new Map());
+  const [copiedClause, setCopiedClause] = useState<string | null>(null);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [dealName, setDealName] = useState("Untitled Deal");
+  const [exportFormat, setExportFormat] = useState<"pdf" | "word" | null>(null);
 
   // Load contract from localStorage on mount
   useEffect(() => {
@@ -415,8 +433,76 @@ export default function ReportPage() {
     }
   };
 
-  const handleExportMemo = () => {
-    window.print();
+  const handleRemediate = async (cardId: string, article: string, clause: string, riskSummary: string) => {
+    setRemediationLoading(cardId);
+
+    try {
+      // Extract clause text from contract
+      const range = findSectionLines(contractText, article, clause);
+      if (!range) {
+        throw new Error("Could not find clause text in contract");
+      }
+
+      const lines = contractText.split("\n");
+      const clauseText = lines.slice(range.start, range.end + 1).join("\n");
+
+      const response = await fetch("http://localhost:8000/remediate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          clause_text: clauseText,
+          risk_description: riskSummary,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const result: RemediationResult = await response.json();
+
+      setRemediationResults(prev => {
+        const newMap = new Map(prev);
+        newMap.set(cardId, result);
+        return newMap;
+      });
+    } catch (err) {
+      console.error("Remediation error:", err);
+      setError(err instanceof Error ? err.message : "Remediation failed");
+    } finally {
+      setRemediationLoading(null);
+    }
+  };
+
+  const handleCopyToClipboard = async (text: string, cardId: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedClause(cardId);
+      setTimeout(() => setCopiedClause(null), 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  };
+
+  const handleExport = (format: "pdf" | "word") => {
+    setExportFormat(format);
+    setExportDialogOpen(true);
+  };
+
+  const confirmExport = () => {
+    if (!optimizerData || !exportFormat) return;
+
+    const debateTranscript = buildDebateTranscript(analysisResult);
+
+    if (exportFormat === "pdf") {
+      exportAsPDF(dealName, optimizerData, remediationResults, debateTranscript);
+    } else {
+      exportAsWord(dealName, optimizerData, remediationResults, debateTranscript);
+    }
+
+    setExportDialogOpen(false);
   };
 
   const getScoreIndicatorColor = (score: number) => {
@@ -523,14 +609,24 @@ export default function ReportPage() {
                 </Button>
               )}
               {optimizerData && (
-                <Button
-                  onClick={handleExportMemo}
-                  variant="outline"
-                  className="border-2 border-zinc-600 text-white hover:bg-zinc-800 hover:border-zinc-500 font-semibold"
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  <span className="hidden sm:inline">Export</span>
-                </Button>
+                <>
+                  <Button
+                    onClick={() => handleExport("pdf")}
+                    variant="outline"
+                    className="border-2 border-zinc-600 text-white hover:bg-zinc-800 hover:border-zinc-500 font-semibold"
+                  >
+                    <FileText className="mr-2 h-4 w-4" />
+                    <span className="hidden sm:inline">Export PDF</span>
+                  </Button>
+                  <Button
+                    onClick={() => handleExport("word")}
+                    variant="outline"
+                    className="border-2 border-zinc-600 text-white hover:bg-zinc-800 hover:border-zinc-500 font-semibold"
+                  >
+                    <File className="mr-2 h-4 w-4" />
+                    <span className="hidden sm:inline">Export Word</span>
+                  </Button>
+                </>
               )}
               <Button
                 onClick={handleScanForRisks}
@@ -642,7 +738,7 @@ export default function ReportPage() {
                       </div>
                     </div>
                     <p className="text-base text-zinc-200 mt-6 print:text-zinc-600">
-                      <strong className="text-white">Primary Threat:</strong> {optimizerData.conflict_analysis.primary_threat}
+                      <strong className="text-white">Deal-Breaker Risk:</strong> {optimizerData.conflict_analysis.primary_threat}
                     </p>
                   </div>
                 </CardContent>
@@ -717,11 +813,14 @@ export default function ReportPage() {
                   {optimizerData.article_breakdown.map((item, idx) => {
                     const cardId = `article-${idx}`;
                     const isActive = activeCardIdx === cardId;
+                    const remediation = remediationResults.get(cardId);
+                    const isRemediating = remediationLoading === cardId;
+                    const isHazardous = item.status === "Hazardous" || item.status === "Critical";
+
                     return (
                       <div
                         key={idx}
-                        onClick={() => scrollToSection(item.article, item.clause, cardId)}
-                        className={`p-4 rounded-lg border-2 cursor-pointer transition-all duration-200 shadow-lg ${
+                        className={`p-4 rounded-lg border-2 transition-all duration-200 shadow-lg ${
                           isActive
                             ? item.status === "Hazardous"
                               ? "bg-red-950/60 border-red-500 ring-2 ring-red-500/60 shadow-red-500/40"
@@ -729,15 +828,112 @@ export default function ReportPage() {
                               ? "bg-orange-950/60 border-orange-500 ring-2 ring-orange-500/60 shadow-orange-500/40"
                               : "bg-green-950/60 border-green-500 ring-2 ring-green-500/60 shadow-green-500/40"
                             : "bg-zinc-900 border-zinc-600 hover:border-zinc-500 hover:bg-zinc-800 hover:shadow-xl"
-                        } print:bg-white print:border-zinc-300 print:cursor-default`}
+                        } print:bg-white print:border-zinc-300`}
                       >
-                        <div className="flex items-center justify-between mb-3">
-                          <span className="font-bold text-white text-base print:text-black">
-                            {item.article} - {item.clause}
-                          </span>
-                          {getStatusBadge(item.status)}
+                        <div
+                          className="cursor-pointer"
+                          onClick={() => scrollToSection(item.article, item.clause, cardId)}
+                        >
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="font-bold text-white text-base print:text-black">
+                              {item.article} - {item.clause}
+                            </span>
+                            {getStatusBadge(item.status)}
+                          </div>
+                          <p className="text-base text-zinc-200 print:text-zinc-600 leading-relaxed">{item.risk_summary}</p>
                         </div>
-                        <p className="text-base text-zinc-200 print:text-zinc-600 leading-relaxed">{item.risk_summary}</p>
+
+                        {/* Suggest Fix Button for Hazardous clauses */}
+                        {isHazardous && !remediation && (
+                          <div className="mt-4 pt-4 border-t border-zinc-700">
+                            <Button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemediate(cardId, item.article, item.clause, item.risk_summary);
+                              }}
+                              disabled={isRemediating}
+                              className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold shadow-lg shadow-purple-500/30"
+                            >
+                              {isRemediating ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Drafting remedy...
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="mr-2 h-4 w-4" />
+                                  Suggest Fix
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        )}
+
+                        {/* Remediation Diff View */}
+                        {remediation && (
+                          <div className="mt-4 pt-4 border-t border-zinc-700 space-y-4">
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-sm font-bold text-purple-400 flex items-center gap-2">
+                                <Sparkles className="w-4 h-4" />
+                                Suggested Remediation
+                              </h4>
+                              <Button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleCopyToClipboard(remediation.rewritten, cardId);
+                                }}
+                                variant="outline"
+                                size="sm"
+                                className="border-zinc-600 text-zinc-300 hover:bg-zinc-800"
+                              >
+                                {copiedClause === cardId ? (
+                                  <>
+                                    <Check className="mr-2 h-3 w-3" />
+                                    Copied!
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="mr-2 h-3 w-3" />
+                                    Copy Fix
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+
+                            {/* Diff View */}
+                            <div className="space-y-3">
+                              {/* Original Clause */}
+                              <div className="bg-red-950/30 border-2 border-red-700/50 rounded-lg p-3">
+                                <p className="text-xs font-bold text-red-400 mb-2 flex items-center gap-1">
+                                  <span className="inline-block w-3 h-3 bg-red-500 rounded-full"></span>
+                                  Original (Hazardous)
+                                </p>
+                                <pre className="text-sm text-red-200 whitespace-pre-wrap font-mono leading-relaxed line-through decoration-red-500 decoration-2">
+                                  {remediation.original}
+                                </pre>
+                              </div>
+
+                              {/* Proposed Fix */}
+                              <div className="bg-green-950/30 border-2 border-green-700/50 rounded-lg p-3">
+                                <p className="text-xs font-bold text-green-400 mb-2 flex items-center gap-1">
+                                  <span className="inline-block w-3 h-3 bg-green-500 rounded-full"></span>
+                                  Proposed Fix (Safer)
+                                </p>
+                                <pre className="text-sm text-green-200 whitespace-pre-wrap font-mono leading-relaxed">
+                                  {remediation.rewritten}
+                                </pre>
+                              </div>
+
+                              {/* Rationale */}
+                              <div className="bg-zinc-800/50 border border-zinc-700 rounded-lg p-3">
+                                <p className="text-xs font-bold text-zinc-400 mb-2">Rationale</p>
+                                <p className="text-sm text-zinc-300 whitespace-pre-wrap leading-relaxed">
+                                  {remediation.rationale}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -833,6 +1029,61 @@ export default function ReportPage() {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Export Dialog */}
+      {exportDialogOpen && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4">
+          <Card className="bg-zinc-900 border-2 border-zinc-700 w-full max-w-md shadow-2xl">
+            <CardHeader>
+              <CardTitle className="text-white flex items-center gap-2">
+                <Download className="w-5 h-5" />
+                Export Red Flag Report
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label className="text-sm font-bold text-zinc-300 mb-2 block">
+                  Deal Name
+                </label>
+                <input
+                  type="text"
+                  value={dealName}
+                  onChange={(e) => setDealName(e.target.value)}
+                  placeholder="Enter deal name..."
+                  className="w-full px-4 py-2 bg-zinc-800 border-2 border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
+                />
+              </div>
+
+              <div className="bg-zinc-800/50 border border-zinc-700 rounded-lg p-3">
+                <p className="text-xs text-zinc-400 mb-2">
+                  <strong className="text-zinc-300">Format:</strong> {exportFormat === "pdf" ? "PDF (immutable)" : "Word (editable)"}
+                </p>
+                <p className="text-xs text-zinc-400">
+                  Report will include: Executive Summary, Critical Risks{" "}
+                  {remediationResults.size > 0 && "(with remediation suggestions)"}, and Full Analysis.
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <Button
+                  onClick={() => setExportDialogOpen(false)}
+                  variant="outline"
+                  className="flex-1 border-2 border-zinc-600 text-white hover:bg-zinc-800"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={confirmExport}
+                  className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold shadow-lg"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Export
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

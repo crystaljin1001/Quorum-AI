@@ -185,6 +185,148 @@ async def analyze_document(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/remediate")
+async def remediate_clause(request: Request):
+    """
+    Remediate a hazardous clause.
+
+    Accepts a clause and risk description, uses Creator to draft a safer version,
+    and Skeptic to verify the new draft is actually safer.
+
+    Request body should be JSON:
+    {
+        "clause_text": "The original hazardous clause text...",
+        "risk_description": "Description of why this clause is risky..."
+    }
+
+    Returns:
+    {
+        "original": "original clause",
+        "rewritten": "safer rewritten clause",
+        "rationale": "explanation of changes"
+    }
+    """
+    try:
+        # Parse request body
+        body = await request.json()
+        clause_text = body.get("clause_text", "")
+        risk_description = body.get("risk_description", "")
+
+        if not clause_text or not risk_description:
+            raise HTTPException(
+                status_code=400,
+                detail="Both clause_text and risk_description are required"
+            )
+
+        logger.info("Received remediation request for clause (length: %d chars)", len(clause_text))
+
+        # Step 1: Use Creator (Claude) to draft a safer version
+        from .graph import get_creator_llm
+        from langchain_core.messages import SystemMessage, HumanMessage
+
+        creator_llm = get_creator_llm()
+
+        creator_prompt = f"""You are a legal expert specializing in contract remediation.
+Your task is to rewrite a hazardous contract clause to mitigate identified risks while maintaining the core business intent.
+
+**Original Clause:**
+{clause_text}
+
+**Identified Risk:**
+{risk_description}
+
+**Instructions:**
+1. Draft a revised version of this clause that addresses the identified risk
+2. Maintain the business purpose but add appropriate safeguards
+3. Use clear, unambiguous language
+4. Add necessary protections for both parties
+
+Please provide:
+1. The rewritten clause (clearly marked)
+2. A brief rationale explaining what changes you made and why they mitigate the risk
+
+Format your response as:
+REWRITTEN CLAUSE:
+[your rewritten clause here]
+
+RATIONALE:
+[explanation of changes]"""
+
+        creator_messages = [
+            SystemMessage(content="You are an expert legal contract drafter."),
+            HumanMessage(content=creator_prompt)
+        ]
+
+        logger.info("Creator drafting safer version...")
+        creator_response = creator_llm.invoke(creator_messages)
+        draft_content = creator_response.content
+
+        # Parse Creator's response
+        rewritten = ""
+        rationale = ""
+
+        if "REWRITTEN CLAUSE:" in draft_content and "RATIONALE:" in draft_content:
+            parts = draft_content.split("RATIONALE:")
+            rewritten_section = parts[0].replace("REWRITTEN CLAUSE:", "").strip()
+            rationale = parts[1].strip()
+            rewritten = rewritten_section
+        else:
+            # Fallback if format isn't followed
+            rewritten = draft_content
+            rationale = "Clause has been rewritten to address identified risks."
+
+        logger.info("Creator draft complete (length: %d chars)", len(rewritten))
+
+        # Step 2: Use Skeptic (DeepSeek) to verify the new draft is safer
+        from .graph import get_skeptic_llm
+
+        skeptic_llm = get_skeptic_llm()
+
+        skeptic_prompt = f"""You are a skeptical legal analyst. Your job is to verify whether a rewritten contract clause actually mitigates the identified risk.
+
+**Original Clause:**
+{clause_text}
+
+**Identified Risk:**
+{risk_description}
+
+**Proposed Rewrite:**
+{rewritten}
+
+**Your Task:**
+Analyze whether the rewritten clause adequately addresses the risk. Look for:
+1. Does it actually fix the identified problem?
+2. Does it introduce any new risks?
+3. Is the language clear and enforceable?
+4. Are there any remaining loopholes?
+
+Provide a brief assessment (2-3 sentences) on whether this rewrite successfully mitigates the risk."""
+
+        skeptic_messages = [
+            SystemMessage(content="You are a skeptical legal risk analyst."),
+            HumanMessage(content=skeptic_prompt)
+        ]
+
+        logger.info("Skeptic verifying safety...")
+        skeptic_response = skeptic_llm.invoke(skeptic_messages)
+        verification = skeptic_response.content
+
+        logger.info("Skeptic verification complete")
+
+        # Append skeptic verification to rationale
+        full_rationale = f"{rationale}\n\n**Skeptic Verification:**\n{verification}"
+
+        return {
+            "original": clause_text,
+            "rewritten": rewritten,
+            "rationale": full_rationale
+        }
+
+    except Exception as e:
+        logger.error("Error during remediation: %s", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/")
 async def root():
     """Root endpoint with API info."""
@@ -193,6 +335,7 @@ async def root():
         "version": "0.1.0",
         "endpoints": {
             "POST /analyze": "Analyze a document through the Social Brain pipeline",
+            "POST /remediate": "Remediate a hazardous clause",
             "GET /health": "Health check"
         }
     }
