@@ -1,0 +1,25 @@
+# FastAPI and server
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-dotenv>=1.0.0
+
+# LangChain and LangGraph
+langgraph>=0.0.40
+langchain>=0.1.0
+langchain-anthropic>=0.1.0
+langchain-openai>=0.0.5
+langchain-core>=0.1.0
+
+# Data processing
+pydantic>=2.0.0
+
+# Security - PII Redaction (Microsoft Presidio)
+presidio-analyzer>=2.2.0
+presidio-anonymizer>=2.2.0
+
+# Mock data generation
+faker>=22.0.0
+
+# Database (for future use)
+# psycopg2-binary>=2.9.0
+# pgvector>=0.2.0
