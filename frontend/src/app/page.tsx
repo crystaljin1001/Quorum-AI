@@ -7,7 +7,16 @@ import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { AlertTriangle, Shield, FileSearch, Loader2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Shield,
+  FileSearch,
+  Loader2,
+  Info,
+  Download,
+  ShieldAlert,
+  FileWarning,
+} from "lucide-react";
 
 // The poison pill contract text
 const CONTRACT_TEXT = `# SHAREHOLDER RIGHTS AGREEMENT
@@ -137,6 +146,7 @@ export default function Home() {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [optimizerData, setOptimizerData] = useState<OptimizerOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showTooltip, setShowTooltip] = useState(false);
 
   const handleScanForRisks = async () => {
     setIsLoading(true);
@@ -176,6 +186,10 @@ export default function Home() {
     }
   };
 
+  const handleExportMemo = () => {
+    window.print();
+  };
+
   const getScoreColor = (score: number) => {
     if (score >= 75) return "bg-red-500";
     if (score >= 50) return "bg-orange-500";
@@ -183,63 +197,82 @@ export default function Home() {
     return "bg-green-500";
   };
 
+  const getScoreIndicatorColor = (score: number) => {
+    if (score >= 75) return "[&>div]:bg-red-500";
+    if (score >= 50) return "[&>div]:bg-orange-500";
+    if (score >= 25) return "[&>div]:bg-yellow-500";
+    return "[&>div]:bg-green-500";
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "Hazardous":
         return <Badge variant="destructive">{status}</Badge>;
       case "Warning":
-        return <Badge className="bg-orange-500 hover:bg-orange-600">{status}</Badge>;
+        return <Badge className="bg-orange-500 hover:bg-orange-600 text-white">{status}</Badge>;
       default:
-        return <Badge className="bg-green-500 hover:bg-green-600">{status}</Badge>;
+        return <Badge className="bg-green-500 hover:bg-green-600 text-white">{status}</Badge>;
     }
   };
 
   return (
-    <div className="flex h-screen bg-zinc-950">
+    <div className="flex h-screen bg-zinc-950 print:bg-white">
       {/* Left Panel - The Evidence */}
-      <div className="w-1/2 border-r border-zinc-800 flex flex-col">
-        <div className="p-4 border-b border-zinc-800 bg-zinc-900">
-          <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+      <div className="w-1/2 border-r border-zinc-800 flex flex-col print:w-full">
+        <div className="p-4 border-b border-zinc-800 bg-zinc-900 print:bg-white print:border-zinc-300">
+          <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2 print:text-black">
             <FileSearch className="w-5 h-5" />
             The Evidence
           </h2>
-          <p className="text-sm text-zinc-400 mt-1">Contract under review</p>
+          <p className="text-sm text-zinc-400 mt-1 print:text-zinc-600">Contract under review</p>
         </div>
         <ScrollArea className="flex-1 p-4">
-          <pre className="text-sm text-zinc-300 whitespace-pre-wrap font-mono leading-relaxed">
+          <pre className="text-sm text-zinc-300 whitespace-pre-wrap font-mono leading-relaxed print:text-black">
             {CONTRACT_TEXT}
           </pre>
         </ScrollArea>
       </div>
 
       {/* Right Panel - The Verdict */}
-      <div className="w-1/2 flex flex-col bg-zinc-900">
-        <div className="p-4 border-b border-zinc-800">
+      <div className="w-1/2 flex flex-col bg-zinc-900 print:w-full print:bg-white">
+        <div className="p-4 border-b border-zinc-800 print:border-zinc-300">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+              <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2 print:text-black">
                 <Shield className="w-5 h-5" />
                 The Verdict
               </h2>
-              <p className="text-sm text-zinc-400 mt-1">AI Risk Assessment Dashboard</p>
+              <p className="text-sm text-zinc-400 mt-1 print:text-zinc-600">AI Risk Assessment Dashboard</p>
             </div>
-            <Button
-              onClick={handleScanForRisks}
-              disabled={isLoading}
-              className="bg-red-600 hover:bg-red-700"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Analyzing...
-                </>
-              ) : (
-                <>
-                  <AlertTriangle className="mr-2 h-4 w-4" />
-                  Scan for Risks
-                </>
+            <div className="flex items-center gap-2 print:hidden">
+              {optimizerData && (
+                <Button
+                  onClick={handleExportMemo}
+                  variant="outline"
+                  className="border-zinc-600 text-zinc-300 hover:bg-zinc-800"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Export Risk Memo
+                </Button>
               )}
-            </Button>
+              <Button
+                onClick={handleScanForRisks}
+                disabled={isLoading}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Analyzing...
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="mr-2 h-4 w-4" />
+                    Scan for Risks
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -255,7 +288,7 @@ export default function Home() {
           {!analysisResult && !isLoading && (
             <div className="flex flex-col items-center justify-center h-full text-zinc-500">
               <Shield className="w-16 h-16 mb-4 opacity-50" />
-              <p className="text-lg">Click "Scan for Risks" to analyze the contract</p>
+              <p className="text-lg">Click &quot;Scan for Risks&quot; to analyze the contract</p>
               <p className="text-sm mt-2">The Social Brain will review this document</p>
             </div>
           )}
@@ -270,11 +303,28 @@ export default function Home() {
 
           {optimizerData && (
             <div className="space-y-4">
-              {/* Conflict Score */}
-              <Card className="bg-zinc-800 border-zinc-700">
+              {/* Adversarial Intensity (formerly Conflict Score) */}
+              <Card className="bg-zinc-800 border-zinc-700 print:bg-white print:border-zinc-300">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-zinc-100 flex items-center justify-between">
-                    <span>Conflict Score</span>
+                  <CardTitle className="text-zinc-100 flex items-center justify-between print:text-black">
+                    <div className="flex items-center gap-2">
+                      <span>Adversarial Intensity</span>
+                      <div className="relative">
+                        <button
+                          onMouseEnter={() => setShowTooltip(true)}
+                          onMouseLeave={() => setShowTooltip(false)}
+                          className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                        >
+                          <Info className="w-4 h-4" />
+                        </button>
+                        {showTooltip && (
+                          <div className="absolute left-1/2 -translate-x-1/2 top-7 z-50 w-72 p-3 text-xs font-normal text-zinc-200 bg-zinc-950 border border-zinc-700 rounded-lg shadow-xl">
+                            Calculated based on the intensity of disagreement between the Creator (Draft) and the Skeptic (Audit).
+                            <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-zinc-950 border-l border-t border-zinc-700 rotate-45" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
                     <Badge
                       className={`${
                         optimizerData.conflict_analysis.risk_level === "Critical"
@@ -284,7 +334,7 @@ export default function Home() {
                           : optimizerData.conflict_analysis.risk_level === "Medium"
                           ? "bg-orange-500"
                           : "bg-green-500"
-                      }`}
+                      } text-white`}
                     >
                       {optimizerData.conflict_analysis.risk_level}
                     </Badge>
@@ -293,16 +343,30 @@ export default function Home() {
                 <CardContent>
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-4xl font-bold text-zinc-100">
+                      <span className="text-4xl font-bold text-zinc-100 print:text-black">
                         {optimizerData.conflict_analysis.score}
                       </span>
                       <span className="text-zinc-400">/100</span>
                     </div>
-                    <Progress
-                      value={optimizerData.conflict_analysis.score}
-                      className={`h-3 ${getScoreColor(optimizerData.conflict_analysis.score)}`}
-                    />
-                    <p className="text-sm text-zinc-400 mt-2">
+                    {/* Progress bar with Market Standard marker */}
+                    <div className="relative">
+                      <Progress
+                        value={optimizerData.conflict_analysis.score}
+                        className={`h-3 ${getScoreIndicatorColor(optimizerData.conflict_analysis.score)}`}
+                      />
+                      {/* Market Standard marker at 40% */}
+                      <div
+                        className="absolute top-0 h-3 w-0.5 bg-zinc-400"
+                        style={{ left: "40%" }}
+                      />
+                      <div
+                        className="absolute top-4 text-[10px] text-zinc-500 -translate-x-1/2 whitespace-nowrap"
+                        style={{ left: "40%" }}
+                      >
+                        Market Standard
+                      </div>
+                    </div>
+                    <p className="text-sm text-zinc-400 mt-5 print:text-zinc-600">
                       <strong>Primary Threat:</strong> {optimizerData.conflict_analysis.primary_threat}
                     </p>
                   </div>
@@ -310,75 +374,97 @@ export default function Home() {
               </Card>
 
               {/* Skeptic's Key Catch */}
-              <Card className="bg-zinc-800 border-zinc-700">
+              <Card className="bg-zinc-800 border-zinc-700 print:bg-white print:border-zinc-300">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-zinc-100 text-base">Key Insight from Skeptic</CardTitle>
+                  <CardTitle className="text-zinc-100 text-base print:text-black">Key Insight from Skeptic</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-zinc-300 text-sm italic">
-                    "{optimizerData.skeptic_validation.key_catch}"
+                  <p className="text-zinc-300 text-sm italic print:text-zinc-700">
+                    &ldquo;{optimizerData.skeptic_validation.key_catch}&rdquo;
                   </p>
                 </CardContent>
               </Card>
 
-              {/* Article Breakdown */}
-              <Card className="bg-zinc-800 border-zinc-700">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-zinc-100">Article Breakdown</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {optimizerData.article_breakdown.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3 bg-zinc-900 rounded-lg border border-zinc-700"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-medium text-zinc-200">
-                          {item.article} - {item.clause}
-                        </span>
-                        {getStatusBadge(item.status)}
-                      </div>
-                      <p className="text-sm text-zinc-400">{item.risk_summary}</p>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-
-              {/* Critical Omissions */}
+              {/* Critical Omissions - MISSING safeguards (dashed red border) */}
               {optimizerData.critical_omissions.length > 0 && (
-                <Card className="bg-zinc-800 border-red-900 border-2">
+                <Card className="bg-zinc-800/50 border-2 border-dashed border-red-700 print:bg-red-50 print:border-red-400">
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-red-400 flex items-center gap-2">
-                      <AlertTriangle className="w-5 h-5" />
-                      Critical Omissions
+                    <CardTitle className="text-red-400 flex items-center gap-2 print:text-red-700">
+                      <FileWarning className="w-5 h-5" />
+                      Missing Safeguards
+                      <span className="text-xs font-normal text-red-500 ml-2">(Critical Omissions)</span>
                     </CardTitle>
+                    <p className="text-xs text-red-500/70 mt-1">
+                      These protections are absent from the contract and should be added.
+                    </p>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     {optimizerData.critical_omissions.map((omission, idx) => (
-                      <Alert key={idx} variant="destructive" className="bg-red-950 border-red-900">
-                        <AlertTriangle className="h-4 w-4" />
-                        <AlertTitle className="flex items-center justify-between">
-                          {omission.missing_provision}
-                          <Badge variant="destructive">{omission.severity}</Badge>
-                        </AlertTitle>
-                        <AlertDescription className="text-red-200">
-                          {omission.impact}
-                        </AlertDescription>
-                      </Alert>
+                      <div
+                        key={idx}
+                        className="p-3 bg-red-950/40 rounded-lg border border-dashed border-red-800 print:bg-red-100 print:border-red-300"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-medium text-red-300 flex items-center gap-1.5 print:text-red-800">
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            {omission.missing_provision}
+                          </span>
+                          <Badge
+                            className={`${
+                              omission.severity === "Critical"
+                                ? "bg-red-600"
+                                : "bg-orange-600"
+                            } text-white text-[10px]`}
+                          >
+                            {omission.severity}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-red-200/80 print:text-red-700">{omission.impact}</p>
+                      </div>
                     ))}
                   </CardContent>
                 </Card>
               )}
 
+              {/* Article Breakdown - PRESENT clauses */}
+              <Card className="bg-zinc-800 border-zinc-700 print:bg-white print:border-zinc-300">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-zinc-100 flex items-center gap-2 print:text-black">
+                    <ShieldAlert className="w-5 h-5" />
+                    Clause Risk Assessment
+                    <span className="text-xs font-normal text-zinc-500 ml-2">(Present in Contract)</span>
+                  </CardTitle>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Risk evaluation of clauses found in the document.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {optimizerData.article_breakdown.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="p-3 bg-zinc-900 rounded-lg border border-zinc-700 print:bg-white print:border-zinc-300"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-medium text-zinc-200 print:text-black">
+                          {item.article} - {item.clause}
+                        </span>
+                        {getStatusBadge(item.status)}
+                      </div>
+                      <p className="text-sm text-zinc-400 print:text-zinc-600">{item.risk_summary}</p>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
               {/* Full Skeptic Critique */}
               {analysisResult && (
-                <Card className="bg-zinc-800 border-zinc-700">
+                <Card className="bg-zinc-800 border-zinc-700 print:bg-white print:border-zinc-300">
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-zinc-100">Full Skeptic Critique</CardTitle>
+                    <CardTitle className="text-zinc-100 print:text-black">Full Skeptic Critique</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <ScrollArea className="h-64">
-                      <pre className="text-sm text-zinc-300 whitespace-pre-wrap">
+                    <ScrollArea className="h-64 print:h-auto">
+                      <pre className="text-sm text-zinc-300 whitespace-pre-wrap print:text-black">
                         {analysisResult.skeptic_critique}
                       </pre>
                     </ScrollArea>
