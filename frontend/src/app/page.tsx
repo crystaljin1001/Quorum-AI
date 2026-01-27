@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -108,6 +108,76 @@ By: _______________________
 Name: Jane Doe
 Title: Vice President`;
 
+// Map article references to search terms for finding them in the contract
+const ARTICLE_SEARCH_MAP: Record<string, string> = {
+  "Article I": "## ARTICLE I",
+  "Article II": "## ARTICLE II",
+  "Article III": "## ARTICLE III",
+  "Article IV": "## ARTICLE IV",
+  "Article V": "## ARTICLE V",
+  "Article VI": "## ARTICLE VI",
+  "Article VII": "## ARTICLE VII",
+};
+
+// Find the line range for a given article/section in the contract
+function findSectionLines(articleRef: string, clauseRef: string): { start: number; end: number } | null {
+  const lines = CONTRACT_TEXT.split("\n");
+
+  // Try to match a specific section first (e.g., "Section 1.2")
+  const sectionMatch = clauseRef.match(/Section\s+([\d.]+)/);
+  if (sectionMatch) {
+    const sectionNum = sectionMatch[1];
+    const sectionPattern = `**Section ${sectionNum}`;
+    let startIdx = -1;
+
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes(sectionPattern)) {
+        startIdx = i;
+        break;
+      }
+    }
+
+    if (startIdx !== -1) {
+      // Find the end: next section header, article header, or separator
+      let endIdx = startIdx + 1;
+      while (endIdx < lines.length) {
+        const line = lines[endIdx];
+        if (line.startsWith("**Section") || line.startsWith("## ARTICLE") || line === "---") {
+          break;
+        }
+        endIdx++;
+      }
+      return { start: startIdx, end: endIdx - 1 };
+    }
+  }
+
+  // Fall back to article-level match
+  const searchTerm = ARTICLE_SEARCH_MAP[articleRef];
+  if (searchTerm) {
+    let startIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes(searchTerm)) {
+        startIdx = i;
+        break;
+      }
+    }
+    if (startIdx !== -1) {
+      // Find end at next article or separator
+      let endIdx = startIdx + 1;
+      while (endIdx < lines.length) {
+        const line = lines[endIdx];
+        if (line.startsWith("## ARTICLE") || line === "---") {
+          break;
+        }
+        endIdx++;
+      }
+      return { start: startIdx, end: endIdx - 1 };
+    }
+  }
+
+  return null;
+}
+
 interface ArticleBreakdown {
   article: string;
   clause: string;
@@ -147,10 +217,42 @@ export default function Home() {
   const [optimizerData, setOptimizerData] = useState<OptimizerOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showTooltip, setShowTooltip] = useState(false);
+  const [highlightedLines, setHighlightedLines] = useState<{ start: number; end: number } | null>(null);
+  const [activeCardIdx, setActiveCardIdx] = useState<string | null>(null);
+
+  const evidencePanelRef = useRef<HTMLDivElement>(null);
+  const lineRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+  // Clear highlight after a delay
+  useEffect(() => {
+    if (highlightedLines) {
+      const timer = setTimeout(() => {
+        setHighlightedLines(null);
+        setActiveCardIdx(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightedLines]);
+
+  const scrollToSection = useCallback((article: string, clause: string, cardId: string) => {
+    const range = findSectionLines(article, clause);
+    if (!range) return;
+
+    setHighlightedLines(range);
+    setActiveCardIdx(cardId);
+
+    // Scroll the line into view
+    const lineEl = lineRefs.current.get(range.start);
+    if (lineEl) {
+      lineEl.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, []);
 
   const handleScanForRisks = async () => {
     setIsLoading(true);
     setError(null);
+    setHighlightedLines(null);
+    setActiveCardIdx(null);
 
     try {
       const response = await fetch("http://localhost:8000/analyze", {
@@ -190,13 +292,6 @@ export default function Home() {
     window.print();
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 75) return "bg-red-500";
-    if (score >= 50) return "bg-orange-500";
-    if (score >= 25) return "bg-yellow-500";
-    return "bg-green-500";
-  };
-
   const getScoreIndicatorColor = (score: number) => {
     if (score >= 75) return "[&>div]:bg-red-500";
     if (score >= 50) return "[&>div]:bg-orange-500";
@@ -215,6 +310,23 @@ export default function Home() {
     }
   };
 
+  const getHighlightClass = (lineIdx: number, status?: string) => {
+    if (!highlightedLines) return "";
+    if (lineIdx >= highlightedLines.start && lineIdx <= highlightedLines.end) {
+      if (status === "Hazardous") return "bg-red-500/20 border-l-2 border-l-red-500";
+      if (status === "Warning") return "bg-yellow-500/15 border-l-2 border-l-yellow-500";
+      return "bg-yellow-500/20 border-l-2 border-l-yellow-400";
+    }
+    return "";
+  };
+
+  // Determine highlight color based on active card status
+  const activeStatus = activeCardIdx && optimizerData
+    ? optimizerData.article_breakdown.find((_, idx) => `article-${idx}` === activeCardIdx)?.status
+    : undefined;
+
+  const contractLines = CONTRACT_TEXT.split("\n");
+
   return (
     <div className="flex h-screen bg-zinc-950 print:bg-white">
       {/* Left Panel - The Evidence */}
@@ -226,11 +338,40 @@ export default function Home() {
           </h2>
           <p className="text-sm text-zinc-400 mt-1 print:text-zinc-600">Contract under review</p>
         </div>
-        <ScrollArea className="flex-1 p-4">
-          <pre className="text-sm text-zinc-300 whitespace-pre-wrap font-mono leading-relaxed print:text-black">
-            {CONTRACT_TEXT}
-          </pre>
-        </ScrollArea>
+        <div ref={evidencePanelRef} className="flex-1 overflow-y-auto">
+          <div className="font-mono text-sm leading-relaxed">
+            {contractLines.map((line, idx) => (
+              <div
+                key={idx}
+                ref={(el) => {
+                  if (el) lineRefs.current.set(idx, el);
+                }}
+                className={`flex transition-colors duration-300 ${getHighlightClass(idx, activeStatus)} ${
+                  highlightedLines &&
+                  idx >= highlightedLines.start &&
+                  idx <= highlightedLines.end
+                    ? "transition-none"
+                    : ""
+                }`}
+              >
+                <span className="select-none text-zinc-600 text-right w-10 shrink-0 pr-3 py-0.5 border-r border-zinc-800 print:text-zinc-400 print:border-zinc-200">
+                  {idx + 1}
+                </span>
+                <span
+                  className={`pl-3 py-0.5 flex-1 whitespace-pre-wrap print:text-black ${
+                    line.startsWith("## ")
+                      ? "text-zinc-100 font-bold"
+                      : line.startsWith("**")
+                      ? "text-zinc-200"
+                      : "text-zinc-400"
+                  }`}
+                >
+                  {line || "\u00A0"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Right Panel - The Verdict */}
@@ -303,7 +444,7 @@ export default function Home() {
 
           {optimizerData && (
             <div className="space-y-4">
-              {/* Adversarial Intensity (formerly Conflict Score) */}
+              {/* Adversarial Intensity */}
               <Card className="bg-zinc-800 border-zinc-700 print:bg-white print:border-zinc-300">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-zinc-100 flex items-center justify-between print:text-black">
@@ -426,7 +567,7 @@ export default function Home() {
                 </Card>
               )}
 
-              {/* Article Breakdown - PRESENT clauses */}
+              {/* Article Breakdown - PRESENT clauses (clickable) */}
               <Card className="bg-zinc-800 border-zinc-700 print:bg-white print:border-zinc-300">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-zinc-100 flex items-center gap-2 print:text-black">
@@ -435,24 +576,37 @@ export default function Home() {
                     <span className="text-xs font-normal text-zinc-500 ml-2">(Present in Contract)</span>
                   </CardTitle>
                   <p className="text-xs text-zinc-500 mt-1">
-                    Risk evaluation of clauses found in the document.
+                    Click a clause to navigate to it in the contract.
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {optimizerData.article_breakdown.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3 bg-zinc-900 rounded-lg border border-zinc-700 print:bg-white print:border-zinc-300"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-medium text-zinc-200 print:text-black">
-                          {item.article} - {item.clause}
-                        </span>
-                        {getStatusBadge(item.status)}
+                  {optimizerData.article_breakdown.map((item, idx) => {
+                    const cardId = `article-${idx}`;
+                    const isActive = activeCardIdx === cardId;
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => scrollToSection(item.article, item.clause, cardId)}
+                        className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 ${
+                          isActive
+                            ? item.status === "Hazardous"
+                              ? "bg-red-950/50 border-red-600 ring-1 ring-red-500/50"
+                              : item.status === "Warning"
+                              ? "bg-yellow-950/30 border-yellow-600 ring-1 ring-yellow-500/50"
+                              : "bg-green-950/30 border-green-600 ring-1 ring-green-500/50"
+                            : "bg-zinc-900 border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800/80"
+                        } print:bg-white print:border-zinc-300 print:cursor-default`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium text-zinc-200 print:text-black">
+                            {item.article} - {item.clause}
+                          </span>
+                          {getStatusBadge(item.status)}
+                        </div>
+                        <p className="text-sm text-zinc-400 print:text-zinc-600">{item.risk_summary}</p>
                       </div>
-                      <p className="text-sm text-zinc-400 print:text-zinc-600">{item.risk_summary}</p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </CardContent>
               </Card>
 
