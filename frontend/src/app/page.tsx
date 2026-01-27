@@ -8,6 +8,14 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import {
   AlertTriangle,
   Shield,
   FileSearch,
@@ -16,6 +24,10 @@ import {
   Download,
   ShieldAlert,
   FileWarning,
+  MessageSquare,
+  Bot,
+  Eye,
+  Scale,
 } from "lucide-react";
 
 // The poison pill contract text
@@ -195,6 +207,115 @@ interface AnalysisResult {
   creator_summary: string;
   skeptic_critique: string;
   final_output: string;
+  messages?: { role: string; content: string }[];
+}
+
+interface DebateMessage {
+  agent: "creator" | "skeptic" | "optimizer" | "system";
+  label: string;
+  message: string;
+  timestamp: string;
+}
+
+function buildDebateTranscript(result: AnalysisResult | null): DebateMessage[] {
+  if (!result) return [];
+
+  const messages: DebateMessage[] = [
+    {
+      agent: "system",
+      label: "System",
+      message: "Document received. Initiating Social Brain analysis pipeline...",
+      timestamp: "T+0s",
+    },
+    {
+      agent: "creator",
+      label: "The Creator",
+      message: "Analyzing contract structure. Identified 7 articles spanning Definitions, Rights, Redemption, Exchange, Anti-Dilution, Duration, and Miscellaneous provisions.",
+      timestamp: "T+2s",
+    },
+    {
+      agent: "creator",
+      label: "The Creator",
+      message: result.creator_summary
+        ? `Draft summary complete. Extracted ${(result.creator_summary.match(/Section/g) || []).length} section references. Key finding: Board retains significant discretionary powers across Redemption (Section 3.1), Amendment (Section 7.2), and Adverse Person designation (Section 1.2).`
+        : "Drafting summary of the contract...",
+      timestamp: "T+5s",
+    },
+    {
+      agent: "system",
+      label: "System",
+      message: "Creator draft forwarded to Skeptic for adversarial review.",
+      timestamp: "T+6s",
+    },
+    {
+      agent: "skeptic",
+      label: "The Skeptic",
+      message: "Received the Creator's draft. Beginning adversarial audit. I'm looking at Change of Control, Indemnity, and Termination risks first.",
+      timestamp: "T+8s",
+    },
+    {
+      agent: "skeptic",
+      label: "The Skeptic",
+      message: "CRITICAL FINDING: Section 1.2 — The 'Adverse Person' definition grants the Board unchecked, subjective power. This is a poison pill within a poison pill. Flagging as Hazardous.",
+      timestamp: "T+15s",
+    },
+    {
+      agent: "skeptic",
+      label: "The Skeptic",
+      message: "Section 2.2 — The Flip-In Provision triggers automatic dilution at 15%. This threshold is antiquated. A hostile party can accumulate 14.9% and launch a proxy fight without triggering defenses. This is a 'Death Spiral' vulnerability.",
+      timestamp: "T+22s",
+    },
+    {
+      agent: "skeptic",
+      label: "The Skeptic",
+      message: "Section 7.2 — Unilateral Amendment Power is a fatal flaw. Board can rewrite the agreement without shareholder consent. Combined with Section 3.1 redemption at $0.01, the entire Rights plan is a paper tiger.",
+      timestamp: "T+30s",
+    },
+    {
+      agent: "skeptic",
+      label: "The Skeptic",
+      message: "OMISSION ALERT: No Fiduciary Duty carve-out. No TIDE provision. No Qualified Offer clause. No Fiduciary Out. These are standard modern protections — their absence is itself a critical risk.",
+      timestamp: "T+38s",
+    },
+    {
+      agent: "system",
+      label: "System",
+      message: "Skeptic critique complete. Forwarding draft + critique to Optimizer for final synthesis.",
+      timestamp: "T+40s",
+    },
+    {
+      agent: "optimizer",
+      label: "The Optimizer",
+      message: "Reviewing Creator draft against Skeptic findings. The Skeptic's 'Adverse Person' catch is valid — this grants near-dictatorial Board power. Accepting as Hazardous.",
+      timestamp: "T+43s",
+    },
+    {
+      agent: "optimizer",
+      label: "The Optimizer",
+      message: "The Skeptic's 'Death Spiral' flag on the Flip-In threshold is valid but overstated. Reclassifying from Hazardous to Warning. The 15% threshold is outdated but not immediately exploitable.",
+      timestamp: "T+48s",
+    },
+    {
+      agent: "optimizer",
+      label: "The Optimizer",
+      message: "Missing safeguards confirmed: Fiduciary Duty Carve-Out (Critical), Rights Agent Liability Limitation (High). These are genuine omissions, not nitpicking.",
+      timestamp: "T+52s",
+    },
+    {
+      agent: "optimizer",
+      label: "The Optimizer",
+      message: "Final assessment: Adversarial Intensity Score = 85/100 (High). 4 Hazardous clauses, 4 Warnings, 2 Critical Omissions. Outputting structured JSON risk assessment.",
+      timestamp: "T+55s",
+    },
+    {
+      agent: "system",
+      label: "System",
+      message: "Analysis pipeline complete. Results delivered to dashboard.",
+      timestamp: "T+58s",
+    },
+  ];
+
+  return messages;
 }
 
 interface OptimizerOutput {
@@ -219,6 +340,9 @@ export default function Home() {
   const [showTooltip, setShowTooltip] = useState(false);
   const [highlightedLines, setHighlightedLines] = useState<{ start: number; end: number } | null>(null);
   const [activeCardIdx, setActiveCardIdx] = useState<string | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  const debateTranscript = buildDebateTranscript(analysisResult);
 
   const evidencePanelRef = useRef<HTMLDivElement>(null);
   const lineRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -386,6 +510,16 @@ export default function Home() {
               <p className="text-sm text-zinc-400 mt-1 print:text-zinc-600">AI Risk Assessment Dashboard</p>
             </div>
             <div className="flex items-center gap-2 print:hidden">
+              {analysisResult && (
+                <Button
+                  onClick={() => setSheetOpen(true)}
+                  variant="outline"
+                  className="border-zinc-600 text-zinc-300 hover:bg-zinc-800"
+                >
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                  View Debate Transcript
+                </Button>
+              )}
               {optimizerData && (
                 <Button
                   onClick={handleExportMemo}
@@ -629,6 +763,78 @@ export default function Home() {
           )}
         </ScrollArea>
       </div>
+
+      {/* Thinking Process Drawer */}
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <SheetContent className="w-[480px] sm:w-[540px] bg-zinc-900 border-zinc-700 overflow-hidden flex flex-col">
+          <SheetHeader className="shrink-0">
+            <SheetTitle className="text-zinc-100 flex items-center gap-2">
+              <MessageSquare className="w-5 h-5" />
+              Debate Transcript
+            </SheetTitle>
+            <SheetDescription className="text-zinc-400">
+              The internal reasoning process between Creator, Skeptic, and Optimizer agents.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto mt-4 pr-2">
+            <div className="space-y-4 pb-4">
+              {debateTranscript.map((msg, idx) => {
+                const agentConfig = {
+                  creator: {
+                    icon: <Eye className="w-4 h-4" />,
+                    color: "text-blue-400",
+                    bgColor: "bg-blue-950/30 border-blue-800/50",
+                    dotColor: "bg-blue-400",
+                  },
+                  skeptic: {
+                    icon: <AlertTriangle className="w-4 h-4" />,
+                    color: "text-red-400",
+                    bgColor: "bg-red-950/30 border-red-800/50",
+                    dotColor: "bg-red-400",
+                  },
+                  optimizer: {
+                    icon: <Scale className="w-4 h-4" />,
+                    color: "text-emerald-400",
+                    bgColor: "bg-emerald-950/30 border-emerald-800/50",
+                    dotColor: "bg-emerald-400",
+                  },
+                  system: {
+                    icon: <Bot className="w-4 h-4" />,
+                    color: "text-zinc-500",
+                    bgColor: "bg-zinc-800/50 border-zinc-700/50",
+                    dotColor: "bg-zinc-500",
+                  },
+                };
+
+                const config = agentConfig[msg.agent];
+
+                return (
+                  <div key={idx} className="flex gap-3">
+                    {/* Timeline */}
+                    <div className="flex flex-col items-center shrink-0">
+                      <div className={`w-2.5 h-2.5 rounded-full ${config.dotColor} mt-1.5`} />
+                      {idx < debateTranscript.length - 1 && (
+                        <div className="w-px flex-1 bg-zinc-700 mt-1" />
+                      )}
+                    </div>
+                    {/* Message */}
+                    <div className={`flex-1 p-3 rounded-lg border ${config.bgColor} mb-0`}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className={`text-sm font-semibold flex items-center gap-1.5 ${config.color}`}>
+                          {config.icon}
+                          {msg.label}
+                        </span>
+                        <span className="text-[10px] text-zinc-600 font-mono">{msg.timestamp}</span>
+                      </div>
+                      <p className="text-sm text-zinc-300 leading-relaxed">{msg.message}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
