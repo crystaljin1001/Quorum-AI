@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -371,6 +371,7 @@ export default function ReportPage() {
 
   const evidencePanelRef = useRef<HTMLDivElement>(null);
   const lineRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // Clear highlight after a delay
   useEffect(() => {
@@ -395,6 +396,33 @@ export default function ReportPage() {
       lineEl.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }, [contractText]);
+
+  // Scroll to a specific risk card in the right panel
+  const scrollToCard = useCallback((cardId: string) => {
+    const cardEl = cardRefs.current.get(cardId);
+    if (cardEl) {
+      cardEl.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, []);
+
+  // Handle clicking a line in the left panel - find and highlight corresponding risk card
+  const handleLineClick = useCallback((lineIdx: number) => {
+    if (!optimizerData) return;
+
+    // Find which risk card corresponds to this line
+    for (let i = 0; i < optimizerData.article_breakdown.length; i++) {
+      const item = optimizerData.article_breakdown[i];
+      const range = findSectionLines(contractText, item.article, item.clause);
+
+      if (range && lineIdx >= range.start && lineIdx <= range.end) {
+        const cardId = `article-${i}`;
+        setHighlightedLines(range);
+        setActiveCardIdx(cardId);
+        scrollToCard(cardId);
+        return;
+      }
+    }
+  }, [optimizerData, contractText, scrollToCard]);
 
   const handleScanForRisks = async () => {
     setIsLoading(true);
@@ -538,6 +566,22 @@ export default function ReportPage() {
     ? optimizerData.article_breakdown.find((_, idx) => `article-${idx}` === activeCardIdx)?.status
     : undefined;
 
+  // Memoize which lines are part of risk sections (for hover styling and click handlers)
+  const riskLineIndices = useMemo(() => {
+    const indices = new Set<number>();
+    if (!optimizerData) return indices;
+
+    for (const item of optimizerData.article_breakdown) {
+      const range = findSectionLines(contractText, item.article, item.clause);
+      if (range) {
+        for (let i = range.start; i <= range.end; i++) {
+          indices.add(i);
+        }
+      }
+    }
+    return indices;
+  }, [optimizerData, contractText]);
+
   const contractLines = contractText.split("\n");
 
   return (
@@ -549,7 +593,7 @@ export default function ReportPage() {
             <FileSearch className="w-6 h-6" />
             The Evidence
           </h2>
-          <p className="text-sm sm:text-base text-zinc-300 mt-2 print:text-zinc-600 font-medium">Contract under review</p>
+          <p className="text-sm sm:text-base text-zinc-300 mt-2 print:text-zinc-600 font-medium">Contract under review - Click any highlighted text to view its risk assessment</p>
         </div>
         <div ref={evidencePanelRef} className="flex-1 overflow-y-auto bg-black">
           <div className="font-mono text-sm sm:text-base leading-relaxed">
@@ -559,11 +603,16 @@ export default function ReportPage() {
                 ref={(el) => {
                   if (el) lineRefs.current.set(idx, el);
                 }}
+                onClick={() => handleLineClick(idx)}
                 className={`flex transition-colors duration-300 ${getHighlightClass(idx, activeStatus)} ${
                   highlightedLines &&
                   idx >= highlightedLines.start &&
                   idx <= highlightedLines.end
                     ? "transition-none"
+                    : ""
+                } ${
+                  riskLineIndices.has(idx)
+                    ? "cursor-pointer hover:bg-zinc-800/50 print:cursor-default print:hover:bg-transparent"
                     : ""
                 }`}
               >
@@ -807,7 +856,7 @@ export default function ReportPage() {
                     <span className="text-sm font-bold text-zinc-400 ml-2">(Present in Contract)</span>
                   </CardTitle>
                   <p className="text-sm text-zinc-300 mt-2 font-medium">
-                    Click a clause to navigate to it in the contract.
+                    Click a clause to navigate to it in the contract. Click highlighted text in the left panel to jump back to its risk assessment.
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -821,6 +870,9 @@ export default function ReportPage() {
                     return (
                       <div
                         key={idx}
+                        ref={(el) => {
+                          if (el) cardRefs.current.set(cardId, el);
+                        }}
                         className={`p-4 rounded-lg border-2 transition-all duration-200 shadow-lg ${
                           isActive
                             ? item.status === "Hazardous"
