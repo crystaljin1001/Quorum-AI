@@ -34,6 +34,7 @@ import {
   File,
 } from "lucide-react";
 import { exportAsPDF, exportAsWord } from "@/lib/exportReport";
+import { RedlineDiff } from "@/components/RedlineDiff";
 
 // The poison pill contract text (fallback for demo)
 const DEMO_CONTRACT_TEXT = `# SHAREHOLDER RIGHTS AGREEMENT
@@ -900,36 +901,27 @@ export default function ReportPage() {
                               </Button>
                             </div>
 
-                            {/* Diff View */}
-                            <div className="space-y-3">
-                              {/* Original Clause */}
-                              <div className="bg-red-950/30 border-2 border-red-700/50 rounded-lg p-3">
-                                <p className="text-xs font-bold text-red-400 mb-2 flex items-center gap-1">
-                                  <span className="inline-block w-3 h-3 bg-red-500 rounded-full"></span>
-                                  Original (Hazardous)
-                                </p>
-                                <pre className="text-sm text-red-200 whitespace-pre-wrap font-mono leading-relaxed line-through decoration-red-500 decoration-2">
-                                  {remediation.original}
-                                </pre>
-                              </div>
-
-                              {/* Proposed Fix */}
-                              <div className="bg-green-950/30 border-2 border-green-700/50 rounded-lg p-3">
-                                <p className="text-xs font-bold text-green-400 mb-2 flex items-center gap-1">
-                                  <span className="inline-block w-3 h-3 bg-green-500 rounded-full"></span>
-                                  Proposed Fix (Safer)
-                                </p>
-                                <pre className="text-sm text-green-200 whitespace-pre-wrap font-mono leading-relaxed">
-                                  {remediation.rewritten}
-                                </pre>
-                              </div>
+                            {/* Professional Legal Redline Diff View */}
+                            <div className="space-y-4">
+                              <RedlineDiff
+                                original={remediation.original}
+                                rewritten={remediation.rewritten}
+                                fileName={`${item.article}_${item.clause.replace(/\s+/g, '_')}.txt`}
+                              />
 
                               {/* Rationale */}
-                              <div className="bg-zinc-800/50 border border-zinc-700 rounded-lg p-3">
-                                <p className="text-xs font-bold text-zinc-400 mb-2">Rationale</p>
-                                <p className="text-sm text-zinc-300 whitespace-pre-wrap leading-relaxed">
-                                  {remediation.rationale}
-                                </p>
+                              <div className="bg-zinc-800/50 border-2 border-zinc-700 rounded-lg p-4">
+                                <h5 className="text-sm font-bold text-purple-400 mb-3 flex items-center gap-2">
+                                  <Info className="w-4 h-4" />
+                                  Rationale & Verification
+                                </h5>
+                                <div className="text-sm text-zinc-200 whitespace-pre-wrap leading-relaxed space-y-2">
+                                  {remediation.rationale.split('\n\n').map((paragraph, i) => (
+                                    <p key={i} className={paragraph.includes('Skeptic Verification') ? 'text-zinc-300 italic border-l-2 border-purple-500 pl-3' : ''}>
+                                      {paragraph}
+                                    </p>
+                                  ))}
+                                </div>
                               </div>
                             </div>
                           </div>
