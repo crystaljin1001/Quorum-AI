@@ -1064,7 +1064,7 @@ export default function ReportPage() {
                         >
                           <div className="flex items-center justify-between mb-3">
                             <span className="font-bold text-white text-base print:text-black">
-                              {item.article} - {item.clause}
+                              {item.article && item.article !== 'N/A' ? `${item.article} - ` : ''}{item.clause || 'Unspecified Clause'}
                             </span>
                             {getStatusBadge(item.status)}
                           </div>
