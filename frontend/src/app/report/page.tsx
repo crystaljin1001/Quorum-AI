@@ -780,7 +780,8 @@ export default function ReportPage() {
                         </button>
                         {showTooltip && (
                           <div className="absolute left-1/2 -translate-x-1/2 top-8 z-50 w-80 p-4 text-sm font-normal text-zinc-200 bg-black border-2 border-zinc-600 rounded-lg shadow-2xl">
-                            Calculated based on the intensity of disagreement between the Creator (Draft) and the Skeptic (Audit).
+                            <p className="mb-2">Measures the <strong className="text-white">logical disagreement</strong> between our auditor (Skeptic) and draftsman (Creator) agents.</p>
+                            <p className="text-xs text-zinc-400">Higher scores indicate more significant risks identified during adversarial review.</p>
                             <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-black border-l-2 border-t-2 border-zinc-600 rotate-45" />
                           </div>
                         )}
@@ -803,31 +804,34 @@ export default function ReportPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-5xl font-bold text-white print:text-black">
+                    <div className="flex items-center gap-2">
+                      <span className="text-6xl font-bold text-white print:text-black tabular-nums">
                         {optimizerData.conflict_analysis.score}
                       </span>
-                      <span className="text-zinc-300 text-2xl font-semibold">/100</span>
+                      <span className="text-zinc-400 text-2xl font-semibold">/100</span>
                     </div>
                     <div className="relative mt-4">
                       <Progress
                         value={optimizerData.conflict_analysis.score}
                         className={`h-4 ${getScoreIndicatorColor(optimizerData.conflict_analysis.score)}`}
                       />
+                      {/* Market Standard Marker at 40% */}
                       <div
-                        className="absolute top-0 h-4 w-1 bg-zinc-300 shadow-md"
+                        className="absolute top-0 h-4 w-0.5 bg-zinc-400 shadow-lg z-10"
                         style={{ left: "40%" }}
                       />
                       <div
-                        className="absolute top-5 text-xs text-zinc-400 -translate-x-1/2 whitespace-nowrap font-bold"
+                        className="absolute top-5 text-xs text-zinc-400 -translate-x-1/2 whitespace-nowrap font-semibold tracking-wide"
                         style={{ left: "40%" }}
                       >
                         Market Standard
                       </div>
                     </div>
-                    <p className="text-base text-zinc-200 mt-6 print:text-zinc-600">
-                      <strong className="text-white">Deal-Breaker Risk:</strong> {optimizerData.conflict_analysis.primary_threat}
-                    </p>
+                    <div className="mt-6 pt-4 border-t border-zinc-700">
+                      <p className="text-base text-zinc-200 print:text-zinc-600 leading-relaxed">
+                        <strong className="text-white font-bold">Deal-Breaker Risk:</strong> {optimizerData.conflict_analysis.primary_threat}
+                      </p>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
