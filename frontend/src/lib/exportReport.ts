@@ -111,7 +111,7 @@ export function exportAsPDF(
   // SECTION 1: EXECUTIVE SUMMARY
   addSectionHeader('EXECUTIVE SUMMARY');
 
-  addText(`Adversarial Intensity Score: ${optimizerData.conflict_analysis.score}/100`, 12, true);
+  addText(`Conflict Score: ${optimizerData.conflict_analysis.score}/100`, 12, true);
   addText(`Risk Level: ${optimizerData.conflict_analysis.risk_level}`, 11, true,
     optimizerData.conflict_analysis.risk_level === 'Critical' || optimizerData.conflict_analysis.risk_level === 'High'
       ? [220, 38, 38] : [0, 0, 0]);
@@ -254,7 +254,7 @@ export async function exportAsWord(
     }),
     new Paragraph({
       children: [
-        new TextRun({ text: `Adversarial Intensity Score: ${optimizerData.conflict_analysis.score}/100`, bold: true }),
+        new TextRun({ text: `Conflict Score: ${optimizerData.conflict_analysis.score}/100`, bold: true }),
       ],
       spacing: { after: 100 },
     }),

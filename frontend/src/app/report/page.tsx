@@ -324,7 +324,7 @@ function buildDebateTranscript(result: AnalysisResult | null): DebateMessage[] {
     {
       agent: "optimizer",
       label: "The Optimizer",
-      message: "Final assessment: Adversarial Intensity Score = 85/100 (High). 4 Hazardous clauses, 4 Warnings, 2 Critical Omissions. Outputting structured JSON risk assessment.",
+      message: "Final assessment: Conflict Score = 85/100 (High). 4 Hazardous clauses, 4 Warnings, 2 Critical Omissions. Outputting structured JSON risk assessment.",
       timestamp: "T+55s",
     },
     {
@@ -764,12 +764,12 @@ export default function ReportPage() {
 
           {optimizerData && (
             <div className="space-y-6">
-              {/* Adversarial Intensity */}
+              {/* Conflict Score */}
               <Card className="bg-zinc-800 border-2 border-zinc-700 shadow-2xl print:bg-white print:border-zinc-300">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-white flex items-center justify-between print:text-black text-xl">
                     <div className="flex items-center gap-3">
-                      <span className="font-bold">Adversarial Intensity</span>
+                      <span className="font-bold">Conflict Score</span>
                       <div className="relative">
                         <button
                           onMouseEnter={() => setShowTooltip(true)}
@@ -780,8 +780,8 @@ export default function ReportPage() {
                         </button>
                         {showTooltip && (
                           <div className="absolute left-1/2 -translate-x-1/2 top-8 z-50 w-80 p-4 text-sm font-normal text-zinc-200 bg-black border-2 border-zinc-600 rounded-lg shadow-2xl">
-                            <p className="mb-2">Measures the <strong className="text-white">logical disagreement</strong> between our auditor (Skeptic) and draftsman (Creator) agents.</p>
-                            <p className="text-xs text-zinc-400">Higher scores indicate more significant risks identified during adversarial review.</p>
+                            <p className="mb-2">Measures the <strong className="text-white">degree of conflict</strong> between our auditor (Skeptic) and draftsman (Creator) agents.</p>
+                            <p className="text-xs text-zinc-400">Higher scores indicate more significant risks and points of disagreement identified.</p>
                             <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-black border-l-2 border-t-2 border-zinc-600 rotate-45" />
                           </div>
                         )}
