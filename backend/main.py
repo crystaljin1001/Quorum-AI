@@ -240,49 +240,64 @@ async def remediate_clause_stream(request: Request):
                 yield f"event: agent_start\ndata: {json.dumps({'agent': 'creator', 'message': 'Draftsman analyzing clause...'})}\n\n"
                 await asyncio.sleep(0.1)
 
+                # Accumulate state across all nodes
+                accumulated_state = initial_state.copy()
+
                 # Run the graph with streaming
-                result_state = None
                 async for event in remediation_graph.astream(initial_state):
                     logger.debug(f"Graph event: {event}")
 
                     # Check if creator completed
-                    if "creator" in event and event["creator"].get("draft"):
-                        draft = event["creator"]["draft"]
-                        yield f"event: agent_progress\ndata: {json.dumps({'agent': 'creator', 'message': 'Crafting safer clause...'})}\n\n"
-                        await asyncio.sleep(0.1)
-                        yield f"event: agent_complete\ndata: {json.dumps({'agent': 'creator', 'message': 'Draft complete', 'draft_preview': draft[:100] + '...' if len(draft) > 100 else draft})}\n\n"
-                        await asyncio.sleep(0.1)
+                    if "creator" in event:
+                        # Merge creator's updates into accumulated state
+                        creator_update = event["creator"]
+                        accumulated_state["draft"] = creator_update.get("draft", accumulated_state.get("draft", ""))
+                        accumulated_state["rationale"] = creator_update.get("rationale", accumulated_state.get("rationale", ""))
+
+                        if creator_update.get("draft"):
+                            draft = creator_update["draft"]
+                            yield f"event: agent_progress\ndata: {json.dumps({'agent': 'creator', 'message': 'Crafting safer clause...'})}\n\n"
+                            await asyncio.sleep(0.1)
+                            yield f"event: agent_complete\ndata: {json.dumps({'agent': 'creator', 'message': 'Draft complete', 'draft_preview': draft[:100] + '...' if len(draft) > 100 else draft})}\n\n"
+                            await asyncio.sleep(0.1)
 
                     # Check if skeptic started
                     if "skeptic" in event:
+                        # Merge skeptic's updates into accumulated state
+                        skeptic_update = event["skeptic"]
+                        accumulated_state["thinking"] = skeptic_update.get("thinking", accumulated_state.get("thinking", ""))
+
                         yield f"event: agent_start\ndata: {json.dumps({'agent': 'skeptic', 'message': 'Auditor reviewing draft...'})}\n\n"
                         await asyncio.sleep(0.1)
                         yield f"event: agent_progress\ndata: {json.dumps({'agent': 'skeptic', 'message': 'Stress-testing for loopholes...'})}\n\n"
                         await asyncio.sleep(0.1)
 
-                        # Get the final state
-                        if event["skeptic"].get("thinking"):
-                            result_state = event["skeptic"]
+                        if skeptic_update.get("thinking"):
                             yield f"event: agent_complete\ndata: {json.dumps({'agent': 'skeptic', 'message': 'Verification complete'})}\n\n"
                             await asyncio.sleep(0.1)
 
-                # Collect final result
-                if result_state:
+                # Collect final result from accumulated state
+                if accumulated_state.get("draft") and accumulated_state.get("thinking"):
                     # Build final rationale
-                    full_rationale = f"{result_state.get('rationale', '')}\n\n**Skeptic Verification:**\n{result_state.get('thinking', '')}"
+                    full_rationale = f"{accumulated_state.get('rationale', '')}\n\n**Skeptic Verification:**\n{accumulated_state.get('thinking', '')}"
 
                     final_result = {
                         "original": clause_text,
-                        "rewritten": result_state.get("draft", ""),
+                        "rewritten": accumulated_state["draft"],
                         "rationale": full_rationale
                     }
 
+                    logger.info(f"Remediation complete. Draft length: {len(accumulated_state['draft'])} chars")
                     yield f"event: complete\ndata: {json.dumps(final_result)}\n\n"
                 else:
-                    yield f"event: error\ndata: {json.dumps({'error': 'Failed to complete remediation'})}\n\n"
+                    error_msg = f"Incomplete remediation: draft={bool(accumulated_state.get('draft'))}, thinking={bool(accumulated_state.get('thinking'))}"
+                    logger.error(error_msg)
+                    yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
 
             except Exception as e:
                 logger.error(f"Error during streaming remediation: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
 
         return StreamingResponse(
