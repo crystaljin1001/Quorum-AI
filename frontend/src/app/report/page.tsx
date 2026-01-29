@@ -207,6 +207,42 @@ function findSectionLines(contractText: string, articleRef: string, clauseRef: s
     }
   }
 
+  // Final fallback: Fuzzy text search for article or clause name
+  // This handles cases where the backend returns descriptive names instead of section numbers
+  console.log(`⚙️ Trying fuzzy search for: "${articleRef}" or "${clauseRef}"`);
+  const searchTerms = [articleRef, clauseRef, `${articleRef} ${clauseRef}`];
+
+  for (const term of searchTerms) {
+    if (!term || term.length < 3) continue; // Skip short/empty terms
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].toLowerCase();
+      const termLower = term.toLowerCase();
+
+      // Check if line contains the search term
+      if (line.includes(termLower)) {
+        console.log(`✓ Fuzzy match found at line ${i}: "${lines[i]}"`);
+        let startIdx = i;
+        let endIdx = startIdx + 1;
+
+        // Extend to next section boundary
+        while (endIdx < lines.length) {
+          const nextLine = lines[endIdx].trim();
+          if (nextLine.startsWith("###") ||
+              nextLine.startsWith("**Section") ||
+              nextLine.startsWith("## ARTICLE") ||
+              nextLine === "---") {
+            break;
+          }
+          endIdx++;
+        }
+
+        return { start: startIdx, end: endIdx - 1 };
+      }
+    }
+  }
+
+  console.warn(`❌ No match found for article="${articleRef}", clause="${clauseRef}"`);
   return null;
 }
 
@@ -696,14 +732,24 @@ export default function ReportPage() {
     const indices = new Set<number>();
     if (!optimizerData) return indices;
 
+    console.log('🔍 Computing riskLineIndices...');
+    console.log('📋 Article breakdown:', optimizerData.article_breakdown);
+
     for (const item of optimizerData.article_breakdown) {
+      console.log(`  Checking: ${item.article} - ${item.clause}`);
       const range = findSectionLines(contractText, item.article, item.clause);
+      console.log(`  Range found:`, range);
+
       if (range) {
         for (let i = range.start; i <= range.end; i++) {
           indices.add(i);
         }
+      } else {
+        console.warn(`  ⚠️ No range found for: ${item.article} - ${item.clause}`);
       }
     }
+
+    console.log(`✅ Total clickable lines: ${indices.size}`);
     return indices;
   }, [optimizerData, contractText]);
 
