@@ -30,9 +30,28 @@ export function RedlineDiff({ original, rewritten, fileName = "clause.txt" }: Re
 
   const files = useMemo(() => {
     try {
-      return parseDiff(diffText);
+      console.log('🔍 Parsing diff text:', diffText);
+      const parsed = parseDiff(diffText);
+      console.log('✅ Parsed diff files:', parsed);
+
+      // Filter out any undefined or invalid file objects
+      const validFiles = parsed.filter(file => {
+        if (!file) {
+          console.warn('⚠️ Undefined file in parsed diff');
+          return false;
+        }
+        if (!file.hunks) {
+          console.warn('⚠️ File missing hunks:', file);
+          return false;
+        }
+        return true;
+      });
+
+      console.log(`✅ Valid files: ${validFiles.length}/${parsed.length}`);
+      return validFiles;
     } catch (error) {
-      console.error("Failed to parse diff:", error);
+      console.error("❌ Failed to parse diff:", error);
+      console.error("Diff text was:", diffText);
       return [];
     }
   }, [diffText]);
@@ -53,9 +72,28 @@ export function RedlineDiff({ original, rewritten, fileName = "clause.txt" }: Re
   };
 
   if (files.length === 0) {
+    // Fallback: Show original and rewritten side by side if diff parsing fails
     return (
-      <div className="bg-zinc-900 border-2 border-zinc-700 rounded-lg p-4">
-        <p className="text-zinc-400 text-sm">No differences to display</p>
+      <div className="bg-zinc-900 border-2 border-zinc-700 rounded-lg overflow-hidden">
+        <div className="bg-zinc-800 border-b-2 border-zinc-700 px-4 py-2">
+          <p className="text-xs font-bold text-zinc-400">
+            Comparison View (diff parsing unavailable)
+          </p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
+          <div>
+            <h4 className="text-xs font-bold text-red-400 mb-2">Original</h4>
+            <pre className="text-xs text-zinc-300 whitespace-pre-wrap bg-red-950/30 border border-red-800/50 rounded p-3">
+              {original}
+            </pre>
+          </div>
+          <div>
+            <h4 className="text-xs font-bold text-green-400 mb-2">Proposed Fix</h4>
+            <pre className="text-xs text-zinc-300 whitespace-pre-wrap bg-green-950/30 border border-green-800/50 rounded p-3">
+              {rewritten}
+            </pre>
+          </div>
+        </div>
       </div>
     );
   }
@@ -181,26 +219,34 @@ export function RedlineDiff({ original, rewritten, fileName = "clause.txt" }: Re
         }
       `}</style>
 
-      {files.map((file, fileIndex) => (
-        <div key={fileIndex}>
-          <div className="bg-zinc-800 border-b-2 border-zinc-700 px-4 py-2">
-            <p className="text-xs font-bold text-zinc-400">
-              Legal Redline: Original vs. Proposed Fix
-            </p>
+      {files.map((file, fileIndex) => {
+        // Safety check
+        if (!file || !file.hunks) {
+          console.warn('⚠️ Skipping invalid file at index:', fileIndex);
+          return null;
+        }
+
+        return (
+          <div key={fileIndex}>
+            <div className="bg-zinc-800 border-b-2 border-zinc-700 px-4 py-2">
+              <p className="text-xs font-bold text-zinc-400">
+                Legal Redline: Original vs. Proposed Fix
+              </p>
+            </div>
+            <Diff
+              key={`${file.oldRevision || 'old'}-${file.newRevision || 'new'}-${fileIndex}`}
+              viewType="unified"
+              diffType={file.type || 'modify'}
+              hunks={file.hunks}
+              renderToken={renderToken}
+            >
+              {(hunks) => hunks.map((hunk, hunkIdx) => (
+                <Hunk key={`${hunk.content}-${hunkIdx}`} hunk={hunk} />
+              ))}
+            </Diff>
           </div>
-          <Diff
-            key={file.oldRevision + '-' + file.newRevision}
-            viewType="unified"
-            diffType={file.type}
-            hunks={file.hunks || []}
-            renderToken={renderToken}
-          >
-            {(hunks) => hunks.map((hunk) => (
-              <Hunk key={hunk.content} hunk={hunk} />
-            ))}
-          </Diff>
-        </div>
-      ))}
+        );
+      })}
 
       <div className="bg-zinc-900 border-t-2 border-zinc-700 px-4 py-3">
         <div className="flex items-center gap-6 text-xs">
