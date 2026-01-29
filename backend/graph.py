@@ -169,3 +169,129 @@ async def analyze_document(document: str) -> dict:
         "final_output": result["final_output"],
         "messages": result["messages"]
     }
+
+
+# ============================================================================
+# REMEDIATION GRAPH WITH STREAMING SUPPORT
+# ============================================================================
+
+class RemediationState(TypedDict):
+    """State for the remediation workflow."""
+    original_clause: str
+    risk_description: str
+    draft: str  # Creator's rewritten clause
+    thinking: str  # Skeptic's verification analysis
+    rationale: str  # Creator's explanation
+    messages: Annotated[list, operator.add]
+
+
+def remediation_creator_node(state: RemediationState) -> RemediationState:
+    """Creator drafts a safer version of the clause."""
+    llm = get_creator_llm()
+
+    prompt = f"""You are a legal expert specializing in contract remediation.
+Your task is to rewrite a hazardous contract clause to mitigate identified risks while maintaining the core business intent.
+
+**Original Clause:**
+{state['original_clause']}
+
+**Identified Risk:**
+{state['risk_description']}
+
+**Instructions:**
+1. Draft a revised version of this clause that addresses the identified risk
+2. Maintain the business purpose but add appropriate safeguards
+3. Use clear, unambiguous language
+4. Add necessary protections for both parties
+
+Please provide:
+1. The rewritten clause (clearly marked)
+2. A brief rationale explaining what changes you made and why they mitigate the risk
+
+Format your response as:
+REWRITTEN CLAUSE:
+[your rewritten clause here]
+
+RATIONALE:
+[explanation of changes]"""
+
+    messages = [
+        SystemMessage(content="You are an expert legal contract drafter."),
+        HumanMessage(content=prompt)
+    ]
+
+    response = llm.invoke(messages)
+    content = response.content
+
+    # Parse response
+    draft = ""
+    rationale = ""
+
+    if "REWRITTEN CLAUSE:" in content and "RATIONALE:" in content:
+        parts = content.split("RATIONALE:")
+        draft = parts[0].replace("REWRITTEN CLAUSE:", "").strip()
+        rationale = parts[1].strip()
+    else:
+        draft = content
+        rationale = "Clause has been rewritten to address identified risks."
+
+    return {
+        "draft": draft,
+        "rationale": rationale,
+        "messages": [{"role": "creator", "content": "Drafting safer clause..."}]
+    }
+
+
+def remediation_skeptic_node(state: RemediationState) -> RemediationState:
+    """Skeptic verifies the rewritten clause addresses the risks."""
+    llm = get_skeptic_llm()
+
+    prompt = f"""You are a skeptical legal analyst. Your job is to verify whether a rewritten contract clause actually mitigates the identified risk.
+
+**Original Clause:**
+{state['original_clause']}
+
+**Identified Risk:**
+{state['risk_description']}
+
+**Proposed Rewrite:**
+{state['draft']}
+
+**Your Task:**
+Analyze whether the rewritten clause adequately addresses the risk. Look for:
+1. Does it actually fix the identified problem?
+2. Does it introduce any new risks?
+3. Is the language clear and enforceable?
+4. Are there any remaining loopholes?
+
+Provide a brief assessment (2-3 sentences) on whether this rewrite successfully mitigates the risk."""
+
+    messages = [
+        SystemMessage(content="You are a skeptical legal risk analyst."),
+        HumanMessage(content=prompt)
+    ]
+
+    response = llm.invoke(messages)
+
+    return {
+        "thinking": response.content,
+        "messages": [{"role": "skeptic", "content": "Stress-testing for loopholes..."}]
+    }
+
+
+def build_remediation_graph() -> StateGraph:
+    """Build the remediation workflow graph."""
+    workflow = StateGraph(RemediationState)
+
+    workflow.add_node("creator", remediation_creator_node)
+    workflow.add_node("skeptic", remediation_skeptic_node)
+
+    workflow.set_entry_point("creator")
+    workflow.add_edge("creator", "skeptic")
+    workflow.add_edge("skeptic", END)
+
+    return workflow.compile()
+
+
+# Create the compiled remediation graph
+remediation_graph = build_remediation_graph()

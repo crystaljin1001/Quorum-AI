@@ -358,6 +358,13 @@ interface RemediationResult {
   rationale: string;
 }
 
+interface ReasoningLog {
+  timestamp: number;
+  agent: 'creator' | 'skeptic';
+  message: string;
+  type: 'start' | 'progress' | 'complete';
+}
+
 export default function ReportPage() {
   const [contractText, setContractText] = useState(DEMO_CONTRACT_TEXT);
   const [isLoading, setIsLoading] = useState(false);
@@ -374,6 +381,11 @@ export default function ReportPage() {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [dealName, setDealName] = useState("Untitled Deal");
   const [exportFormat, setExportFormat] = useState<"pdf" | "word" | null>(null);
+
+  // Streaming remediation state
+  const [reasoningPanelOpen, setReasoningPanelOpen] = useState(false);
+  const [reasoningLogs, setReasoningLogs] = useState<ReasoningLog[]>([]);
+  const [streamingCardId, setStreamingCardId] = useState<string | null>(null);
 
   // Load contract from localStorage on mount
   useEffect(() => {
@@ -502,6 +514,9 @@ export default function ReportPage() {
 
   const handleRemediate = async (cardId: string, article: string, clause: string, riskSummary: string) => {
     setRemediationLoading(cardId);
+    setStreamingCardId(cardId);
+    setReasoningLogs([]);
+    setReasoningPanelOpen(true);
 
     try {
       // Extract clause text from contract
@@ -528,16 +543,88 @@ export default function ReportPage() {
         throw new Error(`API error: ${response.status}`);
       }
 
-      const result: RemediationResult = await response.json();
+      // Handle SSE streaming
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
 
-      setRemediationResults(prev => {
-        const newMap = new Map(prev);
-        newMap.set(cardId, result);
-        return newMap;
-      });
+      if (!reader) {
+        throw new Error("No response body");
+      }
+
+      let buffer = "";
+      let finalResult: RemediationResult | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          const eventMatch = line.match(/^event:\s*(.+)$/m);
+          const dataMatch = line.match(/^data:\s*(.+)$/m);
+
+          if (eventMatch && dataMatch) {
+            const eventType = eventMatch[1];
+            const data = JSON.parse(dataMatch[1]);
+
+            console.log('📡 SSE Event:', eventType, data);
+
+            if (eventType === 'agent_start') {
+              setReasoningLogs(prev => [...prev, {
+                timestamp: Date.now(),
+                agent: data.agent,
+                message: data.message,
+                type: 'start'
+              }]);
+            } else if (eventType === 'agent_progress') {
+              setReasoningLogs(prev => [...prev, {
+                timestamp: Date.now(),
+                agent: data.agent,
+                message: data.message,
+                type: 'progress'
+              }]);
+            } else if (eventType === 'agent_complete') {
+              setReasoningLogs(prev => [...prev, {
+                timestamp: Date.now(),
+                agent: data.agent,
+                message: data.message,
+                type: 'complete'
+              }]);
+            } else if (eventType === 'complete') {
+              finalResult = data as RemediationResult;
+            } else if (eventType === 'error') {
+              throw new Error(data.error || 'Stream error');
+            }
+          }
+        }
+      }
+
+      // Set final result
+      if (finalResult) {
+        setRemediationResults(prev => {
+          const newMap = new Map(prev);
+          newMap.set(cardId, finalResult);
+          return newMap;
+        });
+      } else {
+        throw new Error("No final result received");
+      }
+
     } catch (err) {
       console.error("Remediation error:", err);
       setError(err instanceof Error ? err.message : "Remediation failed");
+      setReasoningLogs(prev => [...prev, {
+        timestamp: Date.now(),
+        agent: 'creator',
+        message: `Error: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        type: 'start'
+      }]);
     } finally {
       setRemediationLoading(null);
     }
@@ -1113,6 +1200,104 @@ export default function ReportPage() {
               })}
             </div>
           </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Live Agent Reasoning Panel */}
+      <Sheet open={reasoningPanelOpen} onOpenChange={setReasoningPanelOpen}>
+        <SheetContent className="w-[520px] sm:w-[600px] bg-black border-l-2 border-zinc-700 overflow-hidden flex flex-col">
+          <SheetHeader className="shrink-0">
+            <SheetTitle className="text-white flex items-center gap-3 text-xl font-bold">
+              <Bot className="w-6 h-6 animate-pulse text-purple-400" />
+              Live Agent Reasoning
+            </SheetTitle>
+            <SheetDescription className="text-zinc-300 text-base font-medium">
+              Watch the Social Brain work in real-time
+            </SheetDescription>
+          </SheetHeader>
+
+          {/* Reasoning Terminal */}
+          <div className="flex-1 overflow-y-auto mt-4 pr-2 font-mono text-sm">
+            <div className="bg-zinc-950 border-2 border-zinc-800 rounded-lg p-4 min-h-full">
+              <div className="space-y-3">
+                {reasoningLogs.length === 0 && (
+                  <div className="flex items-center gap-2 text-zinc-500">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Initializing Social Brain...</span>
+                  </div>
+                )}
+
+                {reasoningLogs.map((log, idx) => {
+                  const agentConfig = {
+                    creator: {
+                      label: 'DRAFTSMAN',
+                      color: 'text-blue-400',
+                      icon: '📝',
+                    },
+                    skeptic: {
+                      label: 'AUDITOR',
+                      color: 'text-red-400',
+                      icon: '🔍',
+                    },
+                  };
+
+                  const config = agentConfig[log.agent];
+                  const isActive = idx === reasoningLogs.length - 1 && remediationLoading;
+
+                  return (
+                    <div
+                      key={idx}
+                      className={`flex items-start gap-3 ${isActive ? 'animate-pulse' : ''}`}
+                    >
+                      <span className="text-lg">{config.icon}</span>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`font-bold ${config.color} text-xs tracking-wider`}>
+                            {config.label}
+                          </span>
+                          <span className="text-zinc-600 text-xs">
+                            {new Date(log.timestamp).toLocaleTimeString()}
+                          </span>
+                        </div>
+                        <p className={`${config.color} leading-relaxed`}>
+                          {log.message}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {remediationLoading && (
+                  <div className="flex items-center gap-2 text-purple-400 mt-4">
+                    <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse"></div>
+                    <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse delay-75"></div>
+                    <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse delay-150"></div>
+                  </div>
+                )}
+
+                {!remediationLoading && reasoningLogs.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-zinc-800">
+                    <div className="flex items-center gap-2 text-emerald-400">
+                      <Check className="w-4 h-4" />
+                      <span className="font-bold">✓ Analysis Complete</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Show remediation result when complete */}
+          {streamingCardId && remediationResults.has(streamingCardId) && !remediationLoading && (
+            <div className="shrink-0 mt-4 pt-4 border-t border-zinc-700">
+              <Button
+                onClick={() => setReasoningPanelOpen(false)}
+                className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold"
+              >
+                View Proposed Fix
+              </Button>
+            </div>
+          )}
         </SheetContent>
       </Sheet>
 
