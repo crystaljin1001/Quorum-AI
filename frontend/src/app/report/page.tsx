@@ -141,25 +141,41 @@ const ARTICLE_SEARCH_MAP: Record<string, string> = {
 function findSectionLines(contractText: string, articleRef: string, clauseRef: string): { start: number; end: number } | null {
   const lines = contractText.split("\n");
 
-  // Try to match a specific section first (e.g., "Section 1.2")
-  const sectionMatch = clauseRef.match(/Section\s+([\d.]+)/);
+  // Extract section number from clause (e.g., "Section 3.1" -> "3.1")
+  const sectionMatch = clauseRef.match(/(?:Section\s+)?([\d.]+)/i);
   if (sectionMatch) {
     const sectionNum = sectionMatch[1];
-    const sectionPattern = `**Section ${sectionNum}`;
     let startIdx = -1;
 
+    // Try multiple patterns to find the section
+    const patterns = [
+      `### ${sectionNum}`,           // Markdown format: ### 3.1
+      `**Section ${sectionNum}`,     // Bold format: **Section 3.1
+      `Section ${sectionNum}`,       // Plain format: Section 3.1
+      `### ${sectionNum} `,          // With trailing space
+      `**${sectionNum}`,             // Just bold number
+    ];
+
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes(sectionPattern)) {
-        startIdx = i;
-        break;
+      const line = lines[i].trim();
+      for (const pattern of patterns) {
+        if (line.startsWith(pattern) || line.includes(pattern)) {
+          startIdx = i;
+          break;
+        }
       }
+      if (startIdx !== -1) break;
     }
 
     if (startIdx !== -1) {
       let endIdx = startIdx + 1;
       while (endIdx < lines.length) {
-        const line = lines[endIdx];
-        if (line.startsWith("**Section") || line.startsWith("## ARTICLE") || line === "---") {
+        const line = lines[endIdx].trim();
+        // Stop at next section or article
+        if (line.startsWith("###") ||
+            line.startsWith("**Section") ||
+            line.startsWith("## ARTICLE") ||
+            line === "---") {
           break;
         }
         endIdx++;
@@ -385,29 +401,47 @@ export default function ReportPage() {
   }, [highlightedLines]);
 
   const scrollToSection = useCallback((article: string, clause: string, cardId: string) => {
+    console.log('🔍 scrollToSection called:', { article, clause, cardId });
     const range = findSectionLines(contractText, article, clause);
-    if (!range) return;
+    console.log('📍 Found range:', range);
+
+    if (!range) {
+      console.warn('❌ No range found for:', { article, clause });
+      return;
+    }
 
     setHighlightedLines(range);
     setActiveCardIdx(cardId);
 
     const lineEl = lineRefs.current.get(range.start);
     if (lineEl) {
+      console.log('✅ Scrolling to line:', range.start);
       lineEl.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else {
+      console.warn('❌ Line element not found for index:', range.start);
     }
   }, [contractText]);
 
   // Scroll to a specific risk card in the right panel
   const scrollToCard = useCallback((cardId: string) => {
+    console.log('🎯 scrollToCard called:', cardId);
     const cardEl = cardRefs.current.get(cardId);
     if (cardEl) {
+      console.log('✅ Scrolling to card element');
       cardEl.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else {
+      console.warn('❌ Card element not found:', cardId);
+      console.log('Available card refs:', Array.from(cardRefs.current.keys()));
     }
   }, []);
 
   // Handle clicking a line in the left panel - find and highlight corresponding risk card
   const handleLineClick = useCallback((lineIdx: number) => {
-    if (!optimizerData) return;
+    console.log('👆 Line clicked:', lineIdx);
+    if (!optimizerData) {
+      console.warn('❌ No optimizer data available');
+      return;
+    }
 
     // Find which risk card corresponds to this line
     for (let i = 0; i < optimizerData.article_breakdown.length; i++) {
@@ -416,12 +450,14 @@ export default function ReportPage() {
 
       if (range && lineIdx >= range.start && lineIdx <= range.end) {
         const cardId = `article-${i}`;
+        console.log('✅ Found matching card:', { cardId, article: item.article, clause: item.clause, range });
         setHighlightedLines(range);
         setActiveCardIdx(cardId);
         scrollToCard(cardId);
         return;
       }
     }
+    console.warn('❌ No matching risk card found for line:', lineIdx);
   }, [optimizerData, contractText, scrollToCard]);
 
   const handleScanForRisks = async () => {
@@ -448,6 +484,8 @@ export default function ReportPage() {
 
       try {
         const parsed = JSON.parse(data.final_output);
+        console.log('📊 Optimizer data parsed:', parsed);
+        console.log('📋 Article breakdown:', parsed.article_breakdown);
         setOptimizerData(parsed);
       } catch {
         const jsonMatch = data.final_output.match(/```json\n?([\s\S]*?)\n?```/);
