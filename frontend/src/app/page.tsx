@@ -4,47 +4,55 @@ import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Shield, Upload, Lock } from "lucide-react";
+import { Shield, Upload, Lock, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { createSession } from "@/lib/api/sessions";
 
-type AnimationPhase = "idle" | "scanning" | "redacting-names" | "masking-values" | "complete";
+type FlowPhase = "idle" | "scanning" | "redirect";
 
 export default function LandingPage() {
   const router = useRouter();
   const [isDragging, setIsDragging] = useState(false);
-  const [animationPhase, setAnimationPhase] = useState<AnimationPhase>("idle");
+  const [flowPhase, setFlowPhase] = useState<FlowPhase>("idle");
   const [uploadedFileName, setUploadedFileName] = useState<string>("");
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const processFile = useCallback(async (file: File) => {
     setUploadedFileName(file.name);
+    setError(null);
+    setFlowPhase("scanning");
+    setIsProcessing(true);
 
-    // Read file content
-    const text = await file.text();
+    try {
+      // Read file content
+      const text = await file.text();
 
-    // Store in localStorage
-    localStorage.setItem("quorum-contract", text);
+      // Create new analysis session with human-in-the-loop PII validation
+      console.log("📤 Creating analysis session...");
+      const sessionResponse = await createSession(text);
 
-    // Start animation sequence
-    setAnimationPhase("scanning");
+      console.log(`✅ Session created: ${sessionResponse.session_id}`);
+      console.log(`🔍 Detected ${sessionResponse.total_entities} PII entities`);
 
-    // Phase 1: Scanning (1.5s)
-    setTimeout(() => {
-      setAnimationPhase("redacting-names");
-    }, 1500);
+      // Store session data temporarily (for workbench to load)
+      localStorage.setItem(`quorum-session-${sessionResponse.session_id}`, JSON.stringify({
+        document: text,
+        detected_entities: sessionResponse.detected_entities,
+        redaction_summary: sessionResponse.redaction_summary
+      }));
 
-    // Phase 2: Redacting names (1.5s)
-    setTimeout(() => {
-      setAnimationPhase("masking-values");
-    }, 3000);
+      // Redirect to workbench for human validation
+      setFlowPhase("redirect");
+      setTimeout(() => {
+        router.push(`/workbench/${sessionResponse.session_id}`);
+      }, 1000);
 
-    // Phase 3: Masking values (1.5s)
-    setTimeout(() => {
-      setAnimationPhase("complete");
-    }, 4500);
-
-    // Redirect to report (brief confirmation then redirect)
-    setTimeout(() => {
-      router.push("/report");
-    }, 5500);
+    } catch (err) {
+      console.error("Error creating session:", err);
+      setError(err instanceof Error ? err.message : "Failed to process file");
+      setFlowPhase("idle");
+      setIsProcessing(false);
+    }
   }, [router]);
 
   const handleFileSelect = useCallback((file: File | null) => {
@@ -84,10 +92,11 @@ export default function LandingPage() {
     handleFileSelect(file || null);
   }, [handleFileSelect]);
 
+
   return (
     <div className="relative flex items-center justify-center min-h-screen bg-black">
-      {/* Main Upload Interface */}
-      {animationPhase === "idle" && (
+      {/* Idle: Upload Interface */}
+      {flowPhase === "idle" && (
         <div className="w-full max-w-3xl px-4 sm:px-6 lg:px-8">
           <Card className="bg-zinc-900 border-2 border-zinc-700 shadow-2xl">
             <CardContent className="pt-12 pb-12 px-6 sm:px-12">
@@ -96,9 +105,9 @@ export default function LandingPage() {
                 <div className="w-20 h-20 rounded-full bg-zinc-800 border-2 border-zinc-600 flex items-center justify-center mb-6 shadow-lg">
                   <Shield className="w-10 h-10 text-zinc-100" />
                 </div>
-                <h1 className="text-4xl font-bold text-white mb-3 text-center">Quorum Data Room</h1>
+                <h1 className="text-4xl font-bold text-white mb-3 text-center">Quorum AI</h1>
                 <p className="text-zinc-300 text-center max-w-md text-lg">
-                  Upload your contract for AI-powered risk analysis
+                  AI-powered M&A contract risk analysis
                 </p>
               </div>
 
@@ -146,131 +155,73 @@ export default function LandingPage() {
                 <Lock className="w-5 h-5 text-green-500" />
                 <p className="font-medium">Privacy-first: All PII is redacted before AI processing</p>
               </div>
+
+              {/* Error Display */}
+              {error && (
+                <div className="mt-6 flex items-center gap-3 text-sm text-red-400 bg-red-950/30 rounded-lg py-3 px-4 border-2 border-red-500">
+                  <AlertTriangle className="w-5 h-5" />
+                  <p className="font-medium">{error}</p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
       )}
 
-      {/* Animation Overlay */}
-      {animationPhase !== "idle" && (
+      {/* Scanning Phase */}
+      {flowPhase === "scanning" && (
         <div className="fixed inset-0 bg-black flex items-center justify-center z-50 px-4">
-          <div className="w-full max-w-4xl">
+          <div className="w-full max-w-2xl">
             <Card className="bg-zinc-900 border-2 border-zinc-700 shadow-2xl">
               <CardContent className="pt-12 pb-12 px-6 sm:px-12">
-                {/* Animation Header */}
-                <div className="flex flex-col items-center mb-10">
-                  <div className="w-20 h-20 rounded-full bg-zinc-800 border-2 border-zinc-600 flex items-center justify-center mb-6 shadow-lg">
-                    <Shield className={`w-10 h-10 text-white ${
-                      animationPhase === "scanning" ? "animate-pulse" : ""
-                    }`} />
+                <div className="flex flex-col items-center">
+                  <div className="w-20 h-20 rounded-full bg-zinc-800 border-2 border-blue-500 flex items-center justify-center mb-6 shadow-lg shadow-blue-500/30">
+                    <Shield className="w-10 h-10 text-blue-500 animate-pulse" />
                   </div>
                   <h2 className="text-3xl font-bold text-white mb-3 text-center">
-                    {animationPhase === "scanning" && "Scanning for PII..."}
-                    {animationPhase === "redacting-names" && "Redacting Names..."}
-                    {animationPhase === "masking-values" && "Masking Deal Values..."}
-                    {animationPhase === "complete" && "Airlock Complete"}
+                    Detecting PII...
                   </h2>
-                  <p className="text-zinc-400 text-base font-medium">{uploadedFileName}</p>
-                </div>
+                  <p className="text-zinc-400 text-base font-medium mb-8">{uploadedFileName}</p>
 
-                {/* Mock Document with Redaction Animation */}
-                <div className="bg-black rounded-xl p-8 font-mono text-base leading-relaxed border-2 border-zinc-800">
-                  {/* Phase 1: Scanning */}
-                  {animationPhase === "scanning" && (
-                    <div className="relative">
-                      <div className="text-zinc-300 space-y-3">
-                        <p>**Effective Date:** January 15, 2024</p>
-                        <p>**Parties:**</p>
-                        <p>- Company Representative: John Smith</p>
-                        <p>- Contract Value: $150.00 per share</p>
-                        <p>- Rights Agent: Jane Doe</p>
-                      </div>
-                      {/* Scanner line */}
-                      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                        <div className="w-full h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent animate-scan shadow-lg shadow-red-500/50" />
-                      </div>
+                  {/* Scanning Animation */}
+                  <div className="w-full bg-zinc-800 rounded-lg p-6 border-2 border-zinc-700 relative overflow-hidden">
+                    <div className="absolute inset-0 pointer-events-none">
+                      <div className="w-full h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent animate-scan shadow-lg shadow-blue-500/50" />
                     </div>
-                  )}
-
-                  {/* Phase 2: Redacting Names */}
-                  {animationPhase === "redacting-names" && (
-                    <div className="text-zinc-300 space-y-3">
-                      <p>**Effective Date:** January 15, 2024</p>
-                      <p>**Parties:**</p>
-                      <p className="flex items-center gap-2 flex-wrap">
-                        - Company Representative:{" "}
-                        <span className="inline-block px-4 py-1.5 bg-red-950 border-2 border-red-500 text-red-400 rounded font-bold animate-fadeIn shadow-lg shadow-red-500/30">
-                          &lt;REDACTED&gt;
-                        </span>
-                      </p>
-                      <p>- Contract Value: $150.00 per share</p>
-                      <p className="flex items-center gap-2 flex-wrap">
-                        - Rights Agent:{" "}
-                        <span className="inline-block px-4 py-1.5 bg-red-950 border-2 border-red-500 text-red-400 rounded font-bold animate-fadeIn shadow-lg shadow-red-500/30">
-                          &lt;REDACTED&gt;
-                        </span>
-                      </p>
+                    <div className="text-zinc-400 text-center font-mono">
+                      Creating session and detecting sensitive entities...
                     </div>
-                  )}
-
-                  {/* Phase 3: Masking Values */}
-                  {animationPhase === "masking-values" && (
-                    <div className="text-zinc-300 space-y-3">
-                      <p>**Effective Date:** January 15, 2024</p>
-                      <p>**Parties:**</p>
-                      <p className="flex items-center gap-2 flex-wrap">
-                        - Company Representative:{" "}
-                        <span className="inline-block px-4 py-1.5 bg-red-950 border-2 border-red-500 text-red-400 rounded font-bold shadow-lg shadow-red-500/30">
-                          &lt;REDACTED&gt;
-                        </span>
-                      </p>
-                      <p className="flex items-center gap-2 flex-wrap">
-                        - Contract Value:{" "}
-                        <span className="inline-block px-4 py-1.5 bg-red-950 border-2 border-red-500 text-red-400 rounded font-bold animate-fadeIn shadow-lg shadow-red-500/30">
-                          &lt;REDACTED&gt;
-                        </span>
-                        {" "}per share
-                      </p>
-                      <p className="flex items-center gap-2 flex-wrap">
-                        - Rights Agent:{" "}
-                        <span className="inline-block px-4 py-1.5 bg-red-950 border-2 border-red-500 text-red-400 rounded font-bold shadow-lg shadow-red-500/30">
-                          &lt;REDACTED&gt;
-                        </span>
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Phase 4: Complete */}
-                  {animationPhase === "complete" && (
-                    <div className="text-center py-6">
-                      <div className="inline-flex items-center gap-4 px-8 py-4 bg-green-950 border-2 border-green-500 text-green-400 rounded-xl shadow-xl shadow-green-500/30">
-                        <Shield className="w-6 h-6" />
-                        <span className="font-bold text-lg">Privacy Airlock Complete</span>
-                      </div>
-                      <p className="text-zinc-400 mt-6 text-base font-medium">Redirecting to analysis dashboard...</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Progress Indicator */}
-                {animationPhase !== "complete" && (
-                  <div className="mt-10 flex justify-center gap-3">
-                    <div className={`w-3 h-3 rounded-full transition-all duration-300 ${
-                      animationPhase === "scanning" ? "bg-red-500 shadow-lg shadow-red-500/50 scale-125" : "bg-zinc-700"
-                    }`} />
-                    <div className={`w-3 h-3 rounded-full transition-all duration-300 ${
-                      animationPhase === "redacting-names" ? "bg-red-500 shadow-lg shadow-red-500/50 scale-125" : "bg-zinc-700"
-                    }`} />
-                    <div className={`w-3 h-3 rounded-full transition-all duration-300 ${
-                      animationPhase === "masking-values" ? "bg-red-500 shadow-lg shadow-red-500/50 scale-125" : "bg-zinc-700"
-                    }`} />
                   </div>
-                )}
+                </div>
               </CardContent>
             </Card>
           </div>
         </div>
       )}
+
+      {/* Redirect Phase */}
+      {flowPhase === "redirect" && (
+        <div className="fixed inset-0 bg-black flex items-center justify-center z-50 px-4">
+          <div className="w-full max-w-2xl">
+            <Card className="bg-zinc-900 border-2 border-blue-500 shadow-2xl shadow-blue-500/30">
+              <CardContent className="pt-12 pb-12 px-6 sm:px-12">
+                <div className="flex flex-col items-center">
+                  <div className="w-20 h-20 rounded-full bg-blue-950 border-2 border-blue-500 flex items-center justify-center mb-6 shadow-lg shadow-blue-500/50 animate-pulse">
+                    <CheckCircle2 className="w-10 h-10 text-blue-400" />
+                  </div>
+                  <h2 className="text-3xl font-bold text-white mb-3 text-center">
+                    PII Detection Complete
+                  </h2>
+                  <p className="text-zinc-300 text-base font-medium">
+                    Redirecting to validation workbench...
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
+
 
       {/* Custom animations */}
       <style jsx global>{`
@@ -279,27 +230,25 @@ export default function LandingPage() {
             transform: translateY(0);
           }
           100% {
-            transform: translateY(200px);
+            transform: translateY(400px);
           }
         }
 
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: scale(0.95);
-          }
-          to {
+        @keyframes pulse-subtle {
+          0%, 100% {
             opacity: 1;
-            transform: scale(1);
+          }
+          50% {
+            opacity: 0.8;
           }
         }
 
         .animate-scan {
-          animation: scan 1.5s ease-in-out;
+          animation: scan 2s ease-in-out infinite;
         }
 
-        .animate-fadeIn {
-          animation: fadeIn 0.3s ease-out;
+        .animate-pulse-subtle {
+          animation: pulse-subtle 2s ease-in-out infinite;
         }
       `}</style>
     </div>

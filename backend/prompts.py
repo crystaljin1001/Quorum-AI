@@ -31,10 +31,15 @@ Task:
 4. Score: Assign a Conflict Score from 0-100 based on the severity of the Skeptic's findings.
 
 Important for article_breakdown:
-- ALWAYS extract actual Article references from the contract (e.g., "Article III", "Article V")
-- ALWAYS use specific section numbers or clause names from the contract (e.g., "Section 3.6", "Material Adverse Effect")
-- NEVER use "N/A" - if you cannot determine the exact article, use the general topic name (e.g., "Termination Provisions", "Indemnity Clauses")
-- Reference the Creator's summary to find specific article/section citations
+- CRITICAL: ALWAYS provide both the Article number AND Section number for every clause
+- Article format: "Article I", "Article II", "Article III", "Article IV", "Article V", "Article VI", "Article VII", etc.
+- Section format: "Section 1.1", "Section 2.1", "Section 3.6", "Section 5.2", etc.
+- Look at the contract structure to match section numbers to their parent articles
+  * For example: If you see "Section 5.2", find which article it belongs to (likely "Article V")
+  * Contract typically follows pattern: Article I has Sections 1.x, Article II has Sections 2.x, Article III has Sections 3.x
+- The Creator's summary should contain article/section references - use those
+- NEVER use descriptive names like "No Solicitation" or "Termination Provisions" as the article field
+- If you cannot determine the article, look at the section number: "Section 5.2" belongs to "Article V"
 
 Constraint: Output ONLY valid JSON. Do not include conversational filler.
 

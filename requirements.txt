@@ -20,6 +20,10 @@ presidio-anonymizer>=2.2.0
 # Mock data generation
 faker>=22.0.0
 
+# Session persistence for human-in-the-loop workflow
+langgraph-checkpoint-sqlite>=0.1.0
+aiosqlite>=0.19.0
+
 # Database (for future use)
 # psycopg2-binary>=2.9.0
 # pgvector>=0.2.0

@@ -21,6 +21,7 @@
     "jspdf": "^4.0.0",
     "lucide-react": "^0.563.0",
     "next": "16.1.5",
+    "radix-ui": "^1.4.3",
     "react": "19.2.3",
     "react-diff-view": "^3.3.2",
     "react-dom": "19.2.3",

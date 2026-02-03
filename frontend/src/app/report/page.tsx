@@ -141,25 +141,44 @@ const ARTICLE_SEARCH_MAP: Record<string, string> = {
 function findSectionLines(contractText: string, articleRef: string, clauseRef: string): { start: number; end: number } | null {
   const lines = contractText.split("\n");
 
+  console.log(`🔎 findSectionLines: article="${articleRef}", clause="${clauseRef}"`);
+
+  // If article is a descriptive name (not "Article X"), try to infer from section number
+  let inferredArticle = articleRef;
+  if (articleRef && !articleRef.match(/^Article\s+[IVX]+$/i)) {
+    const sectionMatch = clauseRef.match(/(?:Section\s+)?(\d+)/i);
+    if (sectionMatch) {
+      const sectionPrefix = parseInt(sectionMatch[1]);
+      const romanNumerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+      if (sectionPrefix > 0 && sectionPrefix <= romanNumerals.length) {
+        inferredArticle = `Article ${romanNumerals[sectionPrefix - 1]}`;
+        console.log(`   ℹ️ Inferred article from section number: "${inferredArticle}"`);
+      }
+    }
+  }
+
   // Extract section number from clause (e.g., "Section 3.1" -> "3.1")
   const sectionMatch = clauseRef.match(/(?:Section\s+)?([\d.]+)/i);
   if (sectionMatch) {
     const sectionNum = sectionMatch[1];
+    console.log(`   Extracted section number: "${sectionNum}"`);
     let startIdx = -1;
 
     // Try multiple patterns to find the section
     const patterns = [
-      `### ${sectionNum}`,           // Markdown format: ### 3.1
-      `**Section ${sectionNum}`,     // Bold format: **Section 3.1
+      `**Section ${sectionNum}`,     // Bold format: **Section 3.1 (most common in our contract)
       `Section ${sectionNum}`,       // Plain format: Section 3.1
-      `### ${sectionNum} `,          // With trailing space
+      `**Section ${sectionNum} -`,   // With dash: **Section 3.1 -
       `**${sectionNum}`,             // Just bold number
     ];
 
+    console.log(`   Trying patterns:`, patterns);
+
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
+      const line = lines[i];
       for (const pattern of patterns) {
-        if (line.startsWith(pattern) || line.includes(pattern)) {
+        if (line.includes(pattern)) {
+          console.log(`   ✓ Found match at line ${i}: "${line}"`);
           startIdx = i;
           break;
         }
@@ -172,24 +191,29 @@ function findSectionLines(contractText: string, articleRef: string, clauseRef: s
       while (endIdx < lines.length) {
         const line = lines[endIdx].trim();
         // Stop at next section or article
-        if (line.startsWith("###") ||
-            line.startsWith("**Section") ||
+        if (line.startsWith("**Section") ||
             line.startsWith("## ARTICLE") ||
             line === "---") {
           break;
         }
         endIdx++;
       }
+      console.log(`   → Returning range ${startIdx}-${endIdx - 1}`);
       return { start: startIdx, end: endIdx - 1 };
+    } else {
+      console.log(`   ✗ No match found for section number "${sectionNum}"`);
     }
   }
 
   // Fall back to article-level match
+  console.log(`   Trying article-level match for: "${articleRef}"`);
   const searchTerm = ARTICLE_SEARCH_MAP[articleRef];
   if (searchTerm) {
+    console.log(`   Article search term: "${searchTerm}"`);
     let startIdx = -1;
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].includes(searchTerm)) {
+        console.log(`   ✓ Found article at line ${i}`);
         startIdx = i;
         break;
       }
@@ -203,46 +227,14 @@ function findSectionLines(contractText: string, articleRef: string, clauseRef: s
         }
         endIdx++;
       }
+      console.log(`   → Returning full article range ${startIdx}-${endIdx - 1}`);
       return { start: startIdx, end: endIdx - 1 };
     }
   }
 
-  // Final fallback: Fuzzy text search for article or clause name
-  // This handles cases where the backend returns descriptive names instead of section numbers
-  console.log(`⚙️ Trying fuzzy search for: "${articleRef}" or "${clauseRef}"`);
-  const searchTerms = [articleRef, clauseRef, `${articleRef} ${clauseRef}`];
-
-  for (const term of searchTerms) {
-    if (!term || term.length < 3) continue; // Skip short/empty terms
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].toLowerCase();
-      const termLower = term.toLowerCase();
-
-      // Check if line contains the search term
-      if (line.includes(termLower)) {
-        console.log(`✓ Fuzzy match found at line ${i}: "${lines[i]}"`);
-        let startIdx = i;
-        let endIdx = startIdx + 1;
-
-        // Extend to next section boundary
-        while (endIdx < lines.length) {
-          const nextLine = lines[endIdx].trim();
-          if (nextLine.startsWith("###") ||
-              nextLine.startsWith("**Section") ||
-              nextLine.startsWith("## ARTICLE") ||
-              nextLine === "---") {
-            break;
-          }
-          endIdx++;
-        }
-
-        return { start: startIdx, end: endIdx - 1 };
-      }
-    }
-  }
-
-  console.warn(`❌ No match found for article="${articleRef}", clause="${clauseRef}"`);
+  // DISABLED: Fuzzy search is too aggressive and causes incorrect matches
+  // If we can't find an exact section match, return null instead of guessing
+  console.warn(`   ❌ No exact match found for article="${articleRef}", clause="${clauseRef}"`);
   return null;
 }
 
@@ -486,15 +478,21 @@ export default function ReportPage() {
   // Handle clicking a line in the left panel - find and highlight corresponding risk card
   const handleLineClick = useCallback((lineIdx: number) => {
     console.log('👆 Line clicked:', lineIdx);
+    const clickedLine = contractText.split("\n")[lineIdx];
+    console.log('   Clicked line content:', clickedLine);
+
     if (!optimizerData) {
       console.warn('❌ No optimizer data available');
       return;
     }
 
     // Find which risk card corresponds to this line
+    console.log('🔍 Checking all article breakdowns:');
     for (let i = 0; i < optimizerData.article_breakdown.length; i++) {
       const item = optimizerData.article_breakdown[i];
+      console.log(`   [${i}] Article: "${item.article}", Clause: "${item.clause}"`);
       const range = findSectionLines(contractText, item.article, item.clause);
+      console.log(`       Range: ${range ? `${range.start}-${range.end}` : 'NOT FOUND'}`);
 
       if (range && lineIdx >= range.start && lineIdx <= range.end) {
         const cardId = `article-${i}`;
@@ -533,12 +531,22 @@ export default function ReportPage() {
       try {
         const parsed = JSON.parse(data.final_output);
         console.log('📊 Optimizer data parsed:', parsed);
-        console.log('📋 Article breakdown:', parsed.article_breakdown);
+        console.log('📋 Article breakdown (detailed):');
+        parsed.article_breakdown.forEach((item: ArticleBreakdown, idx: number) => {
+          console.log(`   [${idx}] Article: "${item.article}", Clause: "${item.clause}", Status: ${item.status}`);
+          console.log(`        Risk: ${item.risk_summary}`);
+        });
         setOptimizerData(parsed);
       } catch {
         const jsonMatch = data.final_output.match(/```json\n?([\s\S]*?)\n?```/);
         if (jsonMatch) {
-          setOptimizerData(JSON.parse(jsonMatch[1]));
+          const parsed = JSON.parse(jsonMatch[1]);
+          console.log('📊 Optimizer data parsed (from code block):', parsed);
+          console.log('📋 Article breakdown (detailed):');
+          parsed.article_breakdown.forEach((item: ArticleBreakdown, idx: number) => {
+            console.log(`   [${idx}] Article: "${item.article}", Clause: "${item.clause}", Status: ${item.status}`);
+          });
+          setOptimizerData(parsed);
         }
       }
     } catch (err) {
@@ -758,15 +766,15 @@ export default function ReportPage() {
   return (
     <div className="flex flex-col lg:flex-row h-screen bg-black print:bg-white">
       {/* Left Panel - The Evidence */}
-      <div className="w-full lg:w-1/2 border-r border-zinc-700 flex flex-col print:w-full">
-        <div className="p-4 sm:p-6 border-b-2 border-zinc-700 bg-zinc-900 print:bg-white print:border-zinc-300">
+      <div className="w-full lg:w-1/2 h-full border-r border-zinc-700 flex flex-col print:w-full">
+        <div className="p-4 sm:p-6 border-b-2 border-zinc-700 bg-zinc-900 print:bg-white print:border-zinc-300 flex-shrink-0">
           <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-3 print:text-black">
             <FileSearch className="w-6 h-6" />
             The Evidence
           </h2>
           <p className="text-sm sm:text-base text-zinc-300 mt-2 print:text-zinc-600 font-medium">Contract under review - Click any highlighted text to view its risk assessment</p>
         </div>
-        <div ref={evidencePanelRef} className="flex-1 overflow-y-auto bg-black">
+        <div ref={evidencePanelRef} className="flex-1 overflow-y-auto bg-black min-h-0">
           <div className="font-mono text-sm sm:text-base leading-relaxed">
             {contractLines.map((line, idx) => (
               <div
@@ -808,8 +816,8 @@ export default function ReportPage() {
       </div>
 
       {/* Right Panel - The Verdict */}
-      <div className="w-full lg:w-1/2 flex flex-col bg-zinc-900 print:w-full print:bg-white">
-        <div className="p-4 sm:p-6 border-b-2 border-zinc-700 print:border-zinc-300">
+      <div className="w-full lg:w-1/2 h-full flex flex-col bg-zinc-900 print:w-full print:bg-white">
+        <div className="p-4 sm:p-6 border-b-2 border-zinc-700 print:border-zinc-300 flex-shrink-0">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
               <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-3 print:text-black">
@@ -870,7 +878,7 @@ export default function ReportPage() {
           </div>
         </div>
 
-        <ScrollArea className="flex-1 p-4">
+        <ScrollArea className="flex-1 min-h-0 p-4">
           {error && (
             <Alert variant="destructive" className="mb-4">
               <AlertTriangle className="h-4 w-4" />
@@ -1035,7 +1043,57 @@ export default function ReportPage() {
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {optimizerData.article_breakdown.map((item, idx) => {
+                  {[...optimizerData.article_breakdown]
+                    .sort((a, b) => {
+                      // Helper: Parse Roman numeral to integer
+                      const parseRomanNumeral = (roman: string): number => {
+                        const romanMap: { [key: string]: number } = {
+                          'I': 1, 'II': 2, 'III': 3, 'IV': 4, 'V': 5,
+                          'VI': 6, 'VII': 7, 'VIII': 8, 'IX': 9, 'X': 10,
+                          'XI': 11, 'XII': 12, 'XIII': 13, 'XIV': 14, 'XV': 15
+                        };
+                        return romanMap[roman] || 999;
+                      };
+
+                      // Helper: Extract article number from string like "Article III"
+                      const getArticleNumber = (article: string): number => {
+                        const match = article.match(/Article\s+([IVX]+)/i);
+                        return match ? parseRomanNumeral(match[1]) : 999;
+                      };
+
+                      // Helper: Extract section number from string like "Section 3.5" or "3.6"
+                      const getSectionNumber = (clause: string): number => {
+                        // Try to extract decimal number like 3.5, 3.6, 6.1
+                        const match = clause.match(/(\d+(?:\.\d+)?(?:\([a-z]\))?)/);
+                        if (match) {
+                          // Remove parentheses like (d) and parse
+                          const numStr = match[1].replace(/\([a-z]\)/g, '');
+                          return parseFloat(numStr) || 999;
+                        }
+                        return 999;
+                      };
+
+                      // Helper: Define severity ranking: Hazardous/Critical = 0, Warning = 1, Safe = 2
+                      const getSeverityRank = (status: string) => {
+                        const normalized = status.toLowerCase();
+                        if (normalized === 'hazardous' || normalized === 'critical') return 0;
+                        if (normalized === 'warning') return 1;
+                        return 2; // Safe or any other status
+                      };
+
+                      // Multi-level sort:
+                      // 1. Primary: Severity (Hazardous first)
+                      const severityDiff = getSeverityRank(a.status) - getSeverityRank(b.status);
+                      if (severityDiff !== 0) return severityDiff;
+
+                      // 2. Secondary: Article number (Article I before Article III)
+                      const articleDiff = getArticleNumber(a.article) - getArticleNumber(b.article);
+                      if (articleDiff !== 0) return articleDiff;
+
+                      // 3. Tertiary: Section number (3.5 before 3.6)
+                      return getSectionNumber(a.clause) - getSectionNumber(b.clause);
+                    })
+                    .map((item, idx) => {
                     const cardId = `article-${idx}`;
                     const isActive = activeCardIdx === cardId;
                     const remediation = remediationResults.get(cardId);
@@ -1064,7 +1122,54 @@ export default function ReportPage() {
                         >
                           <div className="flex items-center justify-between mb-3">
                             <span className="font-bold text-white text-base print:text-black">
-                              {item.article && item.article !== 'N/A' ? `${item.article} - ` : ''}{item.clause || 'Unspecified Clause'}
+                              {(() => {
+                                // Format: "Article III Section 3.6"
+                                const hasArticle = item.article && item.article !== 'N/A';
+                                const hasClause = item.clause && item.clause !== 'N/A';
+
+                                if (!hasArticle && !hasClause) return 'Unspecified Clause';
+
+                                let formatted = '';
+                                let articleDisplay = item.article;
+
+                                // If article is a descriptive name (not "Article X"), try to infer from section
+                                if (hasArticle && !item.article.match(/^Article\s+[IVX]+$/i)) {
+                                  const sectionMatch = item.clause?.match(/(?:Section\s+)?(\d+)/i);
+                                  if (sectionMatch) {
+                                    const sectionPrefix = parseInt(sectionMatch[1]);
+                                    const romanNumerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+                                    if (sectionPrefix > 0 && sectionPrefix <= romanNumerals.length) {
+                                      articleDisplay = `Article ${romanNumerals[sectionPrefix - 1]}`;
+                                    }
+                                  }
+                                }
+
+                                // Add article
+                                if (hasArticle) {
+                                  formatted = articleDisplay;
+                                }
+
+                                // Add clause with "Section" prefix if needed
+                                if (hasClause) {
+                                  const clause = item.clause;
+                                  // Check if clause already starts with "Section"
+                                  const hasSection = /^section\s+/i.test(clause);
+
+                                  if (hasArticle) {
+                                    formatted += ' ';
+                                  }
+
+                                  if (hasSection) {
+                                    // Already has "Section", capitalize it
+                                    formatted += clause.replace(/^section\s+/i, 'Section ');
+                                  } else {
+                                    // Add "Section" prefix
+                                    formatted += `Section ${clause}`;
+                                  }
+                                }
+
+                                return formatted;
+                              })()}
                             </span>
                             {getStatusBadge(item.status)}
                           </div>

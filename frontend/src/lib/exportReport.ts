@@ -134,7 +134,34 @@ export function exportAsPDF(
       const cardId = `article-${optimizerData.article_breakdown.indexOf(item)}`;
       const remediation = remediationResults.get(cardId);
 
-      addText(`${idx + 1}. ${item.article} - ${item.clause}`, 12, true, [220, 38, 38]);
+      // Format: "Article III Section 3.6"
+      const formattedClause = (() => {
+        const hasArticle = item.article && item.article !== 'N/A';
+        const hasClause = item.clause && item.clause !== 'N/A';
+        if (!hasArticle && !hasClause) return 'Unspecified Clause';
+
+        let articleDisplay = item.article;
+        // Infer article from section number if article is descriptive
+        if (hasArticle && !item.article.match(/^Article\s+[IVX]+$/i)) {
+          const sectionMatch = item.clause?.match(/(?:Section\s+)?(\d+)/i);
+          if (sectionMatch) {
+            const sectionPrefix = parseInt(sectionMatch[1]);
+            const romanNumerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+            if (sectionPrefix > 0 && sectionPrefix <= romanNumerals.length) {
+              articleDisplay = `Article ${romanNumerals[sectionPrefix - 1]}`;
+            }
+          }
+        }
+
+        let formatted = hasArticle ? articleDisplay : '';
+        if (hasClause) {
+          const hasSection = /^section\s+/i.test(item.clause);
+          if (hasArticle) formatted += ' ';
+          formatted += hasSection ? item.clause.replace(/^section\s+/i, 'Section ') : `Section ${item.clause}`;
+        }
+        return formatted;
+      })();
+      addText(`${idx + 1}. ${formattedClause}`, 12, true, [220, 38, 38]);
       addText(`Risk: ${item.risk_summary}`, 10, false);
 
       if (remediation) {
@@ -171,7 +198,22 @@ export function exportAsPDF(
       item.status === 'Warning' ? [251, 146, 60] :
       [34, 197, 94];
 
-    addText(`${idx + 1}. ${item.article} - ${item.clause} [${item.status}]`, 10, true, statusColor);
+    // Format: "Article III Section 3.6"
+    const formattedClause = (() => {
+      const hasArticle = item.article && item.article !== 'N/A';
+      const hasClause = item.clause && item.clause !== 'N/A';
+      if (!hasArticle && !hasClause) return 'Unspecified Clause';
+
+      let formatted = hasArticle ? item.article : '';
+      if (hasClause) {
+        const hasSection = /^section\s+/i.test(item.clause);
+        if (hasArticle) formatted += ' ';
+        formatted += hasSection ? item.clause.replace(/^section\s+/i, 'Section ') : `Section ${item.clause}`;
+      }
+      return formatted;
+    })();
+
+    addText(`${idx + 1}. ${formattedClause} [${item.status}]`, 10, true, statusColor);
     addText(item.risk_summary, 9, false);
     yPos += 3;
   });
@@ -312,10 +354,38 @@ export async function exportAsWord(
       const cardId = `article-${optimizerData.article_breakdown.indexOf(item)}`;
       const remediation = remediationResults.get(cardId);
 
+      // Format: "Article III Section 3.6"
+      const formattedClause = (() => {
+        const hasArticle = item.article && item.article !== 'N/A';
+        const hasClause = item.clause && item.clause !== 'N/A';
+        if (!hasArticle && !hasClause) return 'Unspecified Clause';
+
+        let articleDisplay = item.article;
+        // Infer article from section number if article is descriptive
+        if (hasArticle && !item.article.match(/^Article\s+[IVX]+$/i)) {
+          const sectionMatch = item.clause?.match(/(?:Section\s+)?(\d+)/i);
+          if (sectionMatch) {
+            const sectionPrefix = parseInt(sectionMatch[1]);
+            const romanNumerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+            if (sectionPrefix > 0 && sectionPrefix <= romanNumerals.length) {
+              articleDisplay = `Article ${romanNumerals[sectionPrefix - 1]}`;
+            }
+          }
+        }
+
+        let formatted = hasArticle ? articleDisplay : '';
+        if (hasClause) {
+          const hasSection = /^section\s+/i.test(item.clause);
+          if (hasArticle) formatted += ' ';
+          formatted += hasSection ? item.clause.replace(/^section\s+/i, 'Section ') : `Section ${item.clause}`;
+        }
+        return formatted;
+      })();
+
       sections.push(
         new Paragraph({
           children: [
-            new TextRun({ text: `${idx + 1}. ${item.article} - ${item.clause}`, bold: true, color: 'DC2626' }),
+            new TextRun({ text: `${idx + 1}. ${formattedClause}`, bold: true, color: 'DC2626' }),
           ],
           spacing: { before: 200, after: 100 },
         }),
@@ -404,10 +474,25 @@ export async function exportAsWord(
       item.status === 'Warning' ? 'FB923C' :
       '22C55E';
 
+    // Format: "Article III Section 3.6"
+    const formattedClause = (() => {
+      const hasArticle = item.article && item.article !== 'N/A';
+      const hasClause = item.clause && item.clause !== 'N/A';
+      if (!hasArticle && !hasClause) return 'Unspecified Clause';
+
+      let formatted = hasArticle ? item.article : '';
+      if (hasClause) {
+        const hasSection = /^section\s+/i.test(item.clause);
+        if (hasArticle) formatted += ' ';
+        formatted += hasSection ? item.clause.replace(/^section\s+/i, 'Section ') : `Section ${item.clause}`;
+      }
+      return formatted;
+    })();
+
     sections.push(
       new Paragraph({
         children: [
-          new TextRun({ text: `${idx + 1}. ${item.article} - ${item.clause} [${item.status}]`, bold: true, color: statusColor }),
+          new TextRun({ text: `${idx + 1}. ${formattedClause} [${item.status}]`, bold: true, color: statusColor }),
         ],
         spacing: { after: 50 },
       }),

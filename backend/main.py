@@ -18,6 +18,17 @@ from presidio_analyzer.nlp_engine import NlpEngineProvider
 from presidio_anonymizer import AnonymizerEngine
 
 from .graph import social_brain, remediation_graph
+from .core.pii_engine import PIIEngine, PIIEntity
+from .storage.session_store import session_store
+from .models.api_models import (
+    SessionCreateResponse,
+    SessionStateResponse,
+    PIIApprovalRequest,
+    PIIApprovalResponse,
+    PIIEntityModel,
+    TelemetryData
+)
+import uuid
 
 # Load environment variables
 load_dotenv()
@@ -43,7 +54,7 @@ anonymizer = AnonymizerEngine()
 PII_ENTITIES = ["PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS"]
 
 
-def redact_pii(text: str) -> tuple[str, int]:
+def redact_pii(text: str) -> tuple[str, int, dict]:
     """
     Privacy Airlock: Detect and redact PII from text.
 
@@ -54,7 +65,7 @@ def redact_pii(text: str) -> tuple[str, int]:
         text: The input text to redact
 
     Returns:
-        tuple: (redacted_text, count_of_entities_redacted)
+        tuple: (redacted_text, total_count, redaction_summary_dict)
     """
     # Analyze text for PII entities
     results = analyzer.analyze(
@@ -64,7 +75,7 @@ def redact_pii(text: str) -> tuple[str, int]:
     )
 
     if not results:
-        return text, 0
+        return text, 0, {}
 
     # Sort results by start position (descending) for safe replacement
     results = sorted(results, key=lambda x: x.start, reverse=True)
@@ -83,7 +94,16 @@ def redact_pii(text: str) -> tuple[str, int]:
         placeholder = f"<{entity_type}_{entity_counters[entity_type]}>"
         redacted_text = redacted_text[:result.start] + placeholder + redacted_text[result.end:]
 
-    return redacted_text, entity_count
+    # Build redaction summary with friendly names
+    redaction_summary = {
+        "Names": entity_counters.get("PERSON", 0),
+        "Phone Numbers": entity_counters.get("PHONE_NUMBER", 0),
+        "Email Addresses": entity_counters.get("EMAIL_ADDRESS", 0),
+    }
+    # Remove zero counts
+    redaction_summary = {k: v for k, v in redaction_summary.items() if v > 0}
+
+    return redacted_text, entity_count, redaction_summary
 
 
 @asynccontextmanager
@@ -117,6 +137,267 @@ async def health_check():
     return {"status": "healthy", "service": "quorum-social-brain"}
 
 
+@app.post("/sessions/create", response_model=SessionCreateResponse)
+async def create_analysis_session(request: Request):
+    """
+    Create a new analysis session with human-in-the-loop PII validation.
+
+    This is Step 1 of the enhanced workflow:
+    1. Upload document -> detect PII -> pause for human review
+    2. Human approves/edits PII -> resume analysis workflow
+    3. Social Brain agents process masked document
+
+    Returns:
+        Session ID and detected PII entities for user validation
+    """
+    try:
+        # Read document text
+        document = await request.body()
+        document_text = document.decode("utf-8")
+
+        if not document_text.strip():
+            raise HTTPException(status_code=400, detail="Empty document provided")
+
+        # Generate unique session ID
+        session_id = str(uuid.uuid4())
+        logger.info(f"🆔 Creating session {session_id} (document length: {len(document_text)} chars)")
+
+        # Initialize PII engine for this session
+        pii_engine = PIIEngine(session_id)
+
+        # Run automated PII detection
+        detected_entities = pii_engine.detect(document_text)
+        logger.info(f"🔍 Detected {len(detected_entities)} PII entities in session {session_id}")
+
+        # Get redaction summary
+        redaction_summary = pii_engine.get_redaction_summary(detected_entities)
+
+        # Store session state (awaiting human validation)
+        session_store.create_session(
+            session_id=session_id,
+            document=document_text,  # Original (never exposed to LLMs)
+            detected_entities=[e.to_dict() for e in detected_entities],
+            pii_mapping=pii_engine.save_mapping()
+        )
+
+        logger.info(f"✅ Session {session_id} created, awaiting PII approval")
+
+        # Convert PIIEntity to PIIEntityModel for API response
+        entity_models = [
+            PIIEntityModel(**e.to_dict()) for e in detected_entities
+        ]
+
+        return SessionCreateResponse(
+            session_id=session_id,
+            status="awaiting_pii_review",
+            detected_entities=entity_models,
+            total_entities=len(detected_entities),
+            redaction_summary=redaction_summary
+        )
+
+    except Exception as e:
+        logger.error(f"Error creating session: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/sessions/{session_id}/approve-pii", response_model=PIIApprovalResponse)
+async def approve_pii_and_continue(
+    session_id: str,
+    approval: PIIApprovalRequest
+):
+    """
+    Approve PII validation and continue to Social Brain analysis.
+
+    This is Step 2 of the enhanced workflow:
+    - User has reviewed/edited PII entities in the workbench
+    - Apply validated entities to mask document
+    - Run Social Brain workflow on masked document
+
+    Args:
+        session_id: Session identifier from /sessions/create
+        approval: Validated entities and telemetry data
+
+    Returns:
+        Analysis results from Social Brain workflow
+    """
+    try:
+        # Retrieve session
+        session = session_store.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+        logger.info(f"👤 Human approval received for session {session_id}")
+        logger.info(f"📊 Telemetry: dwell_time={approval.telemetry.dwell_time_ms}ms, "
+                   f"corrections={approval.telemetry.manual_corrections}")
+
+        # Get original document
+        original_document = session["document"]
+
+        # Initialize PII engine and load previous mapping
+        pii_engine = PIIEngine(session_id)
+        pii_engine.load_mapping(session["pii_mapping"])
+
+        # Convert validated entities back to PIIEntity objects
+        validated_entities = [
+            PIIEntity(
+                entity_type=e.entity_type,
+                start=e.start,
+                end=e.end,
+                text=e.text,
+                confidence=e.confidence,
+                pseudo_id=e.pseudo_id,
+                source=e.source,
+                dismissed=e.dismissed
+            )
+            for e in approval.validated_entities
+        ]
+
+        # Apply pseudonymization with validated entities
+        masked_document, pii_mapping = pii_engine.pseudonymize(
+            original_document,
+            validated_entities
+        )
+
+        logger.info(f"🔒 Applied PII masking for session {session_id}")
+
+        # Update session with approved PII
+        session_store.approve_pii(
+            session_id=session_id,
+            validated_entities=[e.to_dict() for e in validated_entities],
+            masked_document=masked_document,
+            pii_mapping=pii_mapping,
+            telemetry=approval.telemetry.dict()
+        )
+
+        # Run Social Brain analysis on masked document
+        logger.info(f"🧠 Starting Social Brain analysis for session {session_id}")
+
+        initial_state = {
+            "document": masked_document,  # Use MASKED version
+            "creator_summary": "",
+            "skeptic_critique": "",
+            "final_output": "",
+            "messages": []
+        }
+
+        # Run the graph
+        result = await social_brain.ainvoke(initial_state)
+
+        # Store analysis results
+        session_store.set_analysis_results(
+            session_id=session_id,
+            creator_summary=result["creator_summary"],
+            skeptic_critique=result["skeptic_critique"],
+            final_output=result["final_output"]
+        )
+
+        logger.info(f"✅ Analysis complete for session {session_id}")
+
+        return PIIApprovalResponse(
+            session_id=session_id,
+            status="complete",
+            masked_document=masked_document,
+            final_output=result["final_output"]
+        )
+
+    except Exception as e:
+        logger.error(f"Error during PII approval for session {session_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/sessions/{session_id}/state", response_model=SessionStateResponse)
+async def get_session_state(session_id: str):
+    """
+    Get current state of an analysis session.
+
+    Useful for:
+    - Checking progress
+    - Resuming interrupted workflows
+    - Debugging
+
+    Args:
+        session_id: Session identifier
+
+    Returns:
+        Current session state
+    """
+    try:
+        session = session_store.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+        # Convert detected entities to PIIEntityModel if present
+        detected_entities = None
+        if session.get("detected_entities"):
+            detected_entities = [
+                PIIEntityModel(**e) for e in session["detected_entities"]
+            ]
+
+        return SessionStateResponse(
+            session_id=session_id,
+            status=session["status"],
+            current_node=None,  # TODO: Add when using LangGraph checkpointing
+            detected_entities=detected_entities,
+            creator_summary=session.get("creator_summary"),
+            skeptic_critique=session.get("skeptic_critique"),
+            final_output=session.get("final_output")
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting session state for {session_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/pii/preview")
+async def preview_pii_redaction(request: Request):
+    """
+    Privacy Preview endpoint: Shows users PII-masked version of their contract.
+
+    This is the first step in the Privacy Airlock flow. Accepts raw contract text,
+    detects PII using Presidio, and returns both the masked text and a detailed
+    redaction summary for user approval before processing.
+
+    Returns:
+        {
+            "masked_text": "Contract with <PERSON_1> replaced...",
+            "redaction_summary": {"Names": 14, "Email Addresses": 3},
+            "total_redactions": 17,
+            "original_length": 50000,
+            "masked_length": 50050
+        }
+    """
+    try:
+        # Read the raw document text
+        document = await request.body()
+        document_text = document.decode("utf-8")
+
+        if not document_text.strip():
+            raise HTTPException(status_code=400, detail="Empty document provided")
+
+        original_length = len(document_text)
+        logger.info("🔍 PII Preview: Scanning document (length: %d chars)", original_length)
+
+        # Run Privacy Airlock scan
+        masked_text, total_redactions, redaction_summary = redact_pii(document_text)
+        masked_length = len(masked_text)
+
+        logger.info("🔒 PII Preview: Found %d sensitive entities", total_redactions)
+        if total_redactions > 0:
+            logger.info("🔒 PII Preview: Breakdown - %s", redaction_summary)
+
+        return {
+            "masked_text": masked_text,
+            "redaction_summary": redaction_summary,
+            "total_redactions": total_redactions,
+            "original_length": original_length,
+            "masked_length": masked_length,
+        }
+
+    except Exception as e:
+        logger.error("Error during PII preview: %s", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/analyze")
 async def analyze_document(request: Request):
     """
@@ -139,7 +420,7 @@ async def analyze_document(request: Request):
         logger.info("Received document for analysis (length: %d chars)", len(document_text))
 
         # Privacy Airlock: Redact PII before processing
-        redacted_text, entity_count = redact_pii(document_text)
+        redacted_text, entity_count, redaction_summary = redact_pii(document_text)
         if entity_count > 0:
             print(f"🔒 Privacy Airlock: Redacted {entity_count} sensitive entities before processing.")
             logger.info("🔒 Privacy Airlock: Redacted %d sensitive entities before processing.", entity_count)
@@ -320,10 +601,22 @@ async def root():
     """Root endpoint with API info."""
     return {
         "service": "Quorum Social Brain API",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "endpoints": {
-            "POST /analyze": "Analyze a document through the Social Brain pipeline",
+            "POST /sessions/create": "Create analysis session with human-in-the-loop PII validation",
+            "POST /sessions/{id}/approve-pii": "Approve PII and continue to Social Brain analysis",
+            "GET /sessions/{id}/state": "Get current session state",
+            "POST /pii/preview": "[Legacy] Preview PII redaction",
+            "POST /analyze": "[Legacy] Analyze without human validation",
             "POST /remediate": "Remediate a hazardous clause",
             "GET /health": "Health check"
+        },
+        "workflow": {
+            "recommended": [
+                "1. POST /sessions/create - Upload document, get detected PII",
+                "2. [Frontend] User reviews PII in workbench",
+                "3. POST /sessions/{id}/approve-pii - Submit validated PII, get analysis",
+                "4. POST /remediate - Fix hazardous clauses (optional)"
+            ]
         }
     }
