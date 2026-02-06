@@ -8,6 +8,7 @@ This module implements the three-agent workflow using LangGraph StateGraph:
 """
 
 import os
+import json
 from typing import TypedDict, Annotated
 import operator
 
@@ -17,6 +18,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from .prompts import CREATOR_PROMPT, SKEPTIC_PROMPT, OPTIMIZER_PROMPT
+from .core.scoring import calculate_conflict_score, get_primary_threat
 
 
 class GraphState(TypedDict):
@@ -115,9 +117,51 @@ Please provide your final assessment as JSON.""")
 
     response = llm.invoke(messages)
 
+    # Parse the LLM's JSON output
+    try:
+        # Handle JSON in code blocks
+        content = response.content
+        if '```json' in content:
+            json_match = content.split('```json')[1].split('```')[0]
+            optimizer_output = json.loads(json_match)
+        else:
+            optimizer_output = json.loads(content)
+
+        # Calculate conflict score using hybrid formula
+        score_result = calculate_conflict_score(
+            article_breakdown=optimizer_output.get('article_breakdown', []),
+            critical_omissions=optimizer_output.get('critical_omissions', []),
+            skeptic_critique=state['skeptic_critique']
+        )
+
+        # Get primary threat
+        primary_threat = get_primary_threat(
+            article_breakdown=optimizer_output.get('article_breakdown', []),
+            critical_omissions=optimizer_output.get('critical_omissions', [])
+        )
+
+        # Replace LLM's score with calculated score
+        optimizer_output['conflict_analysis'] = {
+            'score': score_result['score'],
+            'raw_score': score_result['raw_score'],
+            'risk_level': score_result['risk_level'],
+            'primary_threat': primary_threat,
+            'score_breakdown': score_result['breakdown'],
+            'counts': score_result['counts'],
+            'formula': score_result['formula']
+        }
+
+        # Convert back to JSON string
+        final_output = json.dumps(optimizer_output, indent=2)
+
+    except (json.JSONDecodeError, KeyError) as e:
+        # Fallback: return original output if parsing fails
+        print(f"Warning: Could not parse optimizer output for scoring: {e}")
+        final_output = response.content
+
     return {
-        "final_output": response.content,
-        "messages": [{"role": "optimizer", "content": response.content}]
+        "final_output": final_output,
+        "messages": [{"role": "optimizer", "content": final_output}]
     }
 
 

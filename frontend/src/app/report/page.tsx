@@ -15,6 +15,11 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   AlertTriangle,
   Shield,
   FileSearch,
@@ -369,8 +374,31 @@ function buildDebateTranscript(result: AnalysisResult | null): DebateMessage[] {
 interface OptimizerOutput {
   conflict_analysis: {
     score: number;
+    raw_score?: number;
     risk_level: string;
     primary_threat: string;
+    score_breakdown?: {
+      hazardous_clauses: number;
+      warning_clauses: number;
+      critical_omissions: number;
+      keyword_intensity: number;
+      risks_enumerated: number;
+    };
+    counts?: {
+      hazardous_clauses: number;
+      warning_clauses: number;
+      critical_omissions: number;
+    };
+    formula?: {
+      description: string;
+      weights: {
+        hazardous_weight: number;
+        warning_weight: number;
+        omission_weight: number;
+        keyword_weight: number;
+        enumeration_weight: number;
+      };
+    };
   };
   article_breakdown: ArticleBreakdown[];
   critical_omissions: CriticalOmission[];
@@ -399,7 +427,6 @@ export default function ReportPage() {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [optimizerData, setOptimizerData] = useState<OptimizerOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showTooltip, setShowTooltip] = useState(false);
   const [highlightedLines, setHighlightedLines] = useState<{ start: number; end: number } | null>(null);
   const [activeCardIdx, setActiveCardIdx] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -911,22 +938,73 @@ export default function ReportPage() {
                   <CardTitle className="text-white flex items-center justify-between print:text-black text-xl">
                     <div className="flex items-center gap-3">
                       <span className="font-bold">Conflict Score</span>
-                      <div className="relative">
-                        <button
-                          onMouseEnter={() => setShowTooltip(true)}
-                          onMouseLeave={() => setShowTooltip(false)}
-                          className="text-zinc-400 hover:text-white transition-colors"
-                        >
-                          <Info className="w-5 h-5" />
-                        </button>
-                        {showTooltip && (
-                          <div className="absolute left-1/2 -translate-x-1/2 top-8 z-50 w-80 p-4 text-sm font-normal text-zinc-200 bg-black border-2 border-zinc-600 rounded-lg shadow-2xl">
-                            <p className="mb-2">Measures the <strong className="text-white">degree of conflict</strong> between our auditor (Skeptic) and draftsman (Creator) agents.</p>
-                            <p className="text-xs text-zinc-400">Higher scores indicate more significant risks and points of disagreement identified.</p>
-                            <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-black border-l-2 border-t-2 border-zinc-600 rotate-45" />
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button className="text-zinc-400 hover:text-white transition-colors">
+                            <Info className="w-5 h-5" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-96 bg-black border-2 border-zinc-600 text-white shadow-2xl" side="bottom">
+                          <div className="space-y-3">
+                            <div>
+                              <h4 className="font-bold text-white mb-2">What is Conflict Score?</h4>
+                              <p className="text-sm text-zinc-300">
+                                Measures the <strong className="text-white">degree of conflict</strong> between our auditor (Skeptic) and draftsman (Creator) agents.
+                              </p>
+                            </div>
+
+                            <div className="border-t border-zinc-700 pt-3">
+                              <h4 className="font-bold text-blue-400 mb-2 text-sm">Calculation Formula</h4>
+                              <div className="bg-zinc-900 border border-zinc-700 rounded p-3 font-mono text-xs text-zinc-300 leading-relaxed">
+                                Score = (Hazardous × 20) + (Warnings × 8) + (Omissions × 15) + (Keywords × 2) + (Risks × 3)
+                              </div>
+                            </div>
+
+                            {optimizerData.conflict_analysis.score_breakdown && (
+                              <div className="border-t border-zinc-700 pt-3">
+                                <h4 className="font-bold text-emerald-400 mb-2 text-sm">Your Score Breakdown</h4>
+                                <div className="space-y-1 text-xs">
+                                  <div className="flex justify-between">
+                                    <span className="text-zinc-400">Hazardous Clauses:</span>
+                                    <span className="text-white font-mono">{optimizerData.conflict_analysis.counts?.hazardous_clauses || 0} × 20 = {optimizerData.conflict_analysis.score_breakdown.hazardous_clauses}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-zinc-400">Warning Clauses:</span>
+                                    <span className="text-white font-mono">{optimizerData.conflict_analysis.counts?.warning_clauses || 0} × 8 = {optimizerData.conflict_analysis.score_breakdown.warning_clauses}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-zinc-400">Critical Omissions:</span>
+                                    <span className="text-white font-mono">{optimizerData.conflict_analysis.counts?.critical_omissions || 0} × 15 = {optimizerData.conflict_analysis.score_breakdown.critical_omissions}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-zinc-400">Keyword Intensity:</span>
+                                    <span className="text-white font-mono">{Math.round(optimizerData.conflict_analysis.score_breakdown.keyword_intensity)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-zinc-400">Risks Enumerated:</span>
+                                    <span className="text-white font-mono">{optimizerData.conflict_analysis.score_breakdown.risks_enumerated}</span>
+                                  </div>
+                                  <div className="flex justify-between pt-2 border-t border-zinc-700 mt-2">
+                                    <span className="text-zinc-300 font-bold">Total Score:</span>
+                                    <span className="text-white font-bold font-mono">{optimizerData.conflict_analysis.score}/100</span>
+                                  </div>
+                                  {optimizerData.conflict_analysis.raw_score > 100 && (
+                                    <p className="text-xs text-zinc-500 italic mt-1">
+                                      (Raw: {optimizerData.conflict_analysis.raw_score}, capped at 100)
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="border-t border-zinc-700 pt-3">
+                              <p className="text-xs text-zinc-400">
+                                💡 <strong className="text-zinc-300">Deterministic & Explainable:</strong> Same contract always produces the same score. No black-box AI scoring.
+                              </p>
+                            </div>
                           </div>
-                        )}
-                      </div>
+                        </PopoverContent>
+                      </Popover>
                     </div>
                     <Badge
                       className={`${
